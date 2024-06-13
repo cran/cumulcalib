@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+<title>A tutorial on the cumulative calibration assessment and the cumulcalib package</title>
+<style type="text/css">
+/**
+ * Prism.s theme ported from highlight.js's xcode style
+ */
+pre code {
+  padding: 1em;
+}
+.token.comment {
+  color: #007400;
+}
+.token.punctuation {
+  color: #999;
+}
+.token.tag,
+.token.selector {
+  color: #aa0d91;
+}
+.token.boolean,
+.token.number,
+.token.constant,
+.token.symbol {
+  color: #1c00cf;
+}
+.token.property,
+.token.attr-name,
+.token.string,
+.token.char,
+.token.builtin {
+  color: #c41a16;
+}
+.token.inserted {
+  background-color: #ccffd8;
+}
+.token.deleted {
+  background-color: #ffebe9;
+}
+.token.operator,
+.token.entity,
+.token.url,
+.language-css .token.string,
+.style .token.string {
+  color: #9a6e3a;
+}
+.token.atrule,
+.token.attr-value,
+.token.keyword {
+  color: #836c28;
+}
+.token.function,
+.token.class-name {
+  color: #DD4A68;
+}
+.token.regex,
+.token.important,
+.token.variable {
+  color: #5c2699;
+}
+.token.important,
+.token.bold {
+  font-weight: bold;
+}
+.token.italic {
+  font-style: italic;
+}
+</style>
+<style type="text/css">
+body {
+  font-family: sans-serif;
+  max-width: 800px;
+  margin: auto;
+  padding: 1em;
+  line-height: 1.5;
+  box-sizing: border-box;
+}
+body, .footnotes, code { font-size: .9em; }
+li li { font-size: .95em; }
+*, *:before, *:after {
+  box-sizing: inherit;
+}
+pre, img { max-width: 100%; }
+pre, pre:hover {
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+pre code {
+  display: block;
+  overflow-x: auto;
+}
+code { font-family: 'DejaVu Sans Mono', 'Droid Sans Mono', 'Lucida Console', Consolas, Monaco, monospace; }
+:not(pre) > code, code[class] { background-color: #F8F8F8; }
+code.language-undefined, pre > code:not([class]) {
+  background-color: inherit;
+  border: 1px solid #eee;
+}
+table {
+  margin: auto;
+  border-top: 1px solid #666;
+}
+table thead th { border-bottom: 1px solid #ddd; }
+th, td { padding: 5px; }
+thead, tfoot, tr:nth-child(even) { background: #eee; }
+blockquote {
+  color: #666;
+  margin: 0;
+  padding-left: 1em;
+  border-left: 0.5em solid #eee;
+}
+hr, .footnotes::before { border: 1px dashed #ddd; }
+.frontmatter { text-align: center; }
+#TOC .numbered li { list-style: none; }
+#TOC .numbered { padding-left: 0; }
+#TOC .numbered ul { padding-left: 1em; }
+table, .body h2 { border-bottom: 1px solid #666; }
+.body .appendix, .appendix ~ h2 { border-bottom-style: dashed; }
+.footnote-ref a::before { content: "["; }
+.footnote-ref a::after { content: "]"; }
+section.footnotes::before {
+  content: "";
+  display: block;
+  max-width: 20em;
+}
+
+@media print {
+  body {
+    font-size: 12pt;
+    max-width: 100%;
+  }
+  tr, img { page-break-inside: avoid; }
+}
+@media only screen and (min-width: 992px) {
+  pre { white-space: pre; }
+}
+</style>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex/dist/katex.min.css">
+</head>
+<body>
+<div class="frontmatter">
+<div class="title"><h1>A tutorial on the cumulative calibration assessment and the cumulcalib package</h1></div>
+<div class="author"><h2>Mohsen Sadatsafavi</h2></div>
+<div class="date"><h3>2024-06-13</h3></div>
+</div>
+<div class="body">
+<h2 id="introduction">Introduction</h2>
+<p><em>cumulcalib</em> is an R package for the implementation of the cumulative calibration assessment for risk prediction models.</p>
+<p>If you use this approach for scientific work, please cite the original paper: {Sadatsafavi M, Petkau J, Statistics In Medicine, 2004 (doi: 10.1002/sim.10138)}</p>
+<p>In order to use <em>cumulcalib</em> efficiently you should be reasonably familiar with the underlying statistical methodology. Please visit the related publication above (or the arxiv version: <a href="https://arxiv.org/abs/2307.09713">https://arxiv.org/abs/2307.09713</a>).</p>
+<p>We illustrate the use of this package, as well as basic interpretations of the cumulative calibration plots, through a running example.</p>
+<h2 id="setup-a-running-example-based-on-gusto-data">Setup: A running example based on GUSTO data</h2>
+<p>We use data from the GUSTO-I study which is widely used in predictive analytics. These data are available from the <em>predtools</em> package,</p>
+<pre><code class="language-r">  library(predtools)
+  data(gusto)
+  set.seed(1)
+</code></pre>
+<p>The outcome is 30-day mortality (we denote it by \(y\)). We also convert the Killip score, a measure of the severity of heart failure, to a binary variable (cut off &gt;1):</p>
+<pre><code class="language-r">  gusto$y &lt;- gusto$day30
+  gusto$kill &lt;- (as.numeric(gusto$Killip)&gt;1)*1
+</code></pre>
+<p>We will develop and validate a risk prediction model for 30-day mortality after a heart attack based on these data. To create a semi-realistic scenario, we use the non-US sub-sample of the data for model development and the US sub-sample for model validation, and fit a logistic regression model on the development sample.</p>
+<pre><code class="language-r">  dev_data &lt;- gusto[!gusto$regl %in% c(1, 7, 9, 10, 11, 12, 14, 15),] #The regl variable contains location codes
+  val_data &lt;- gusto[gusto$regl %in% c(1, 7, 9, 10, 11, 12, 14, 15),]
+  model &lt;- glm(y ~ age + miloc + pmi + kill + pmin(sysbp,100) + pulse, data=dev_data, family=binomial(link=&quot;logit&quot;))
+</code></pre>
+<p>The prevalence of the outcome in the development and validation samples are, respectively, 0.07 and 0.07. Here are the coefficients of the model:</p>
+<table>
+<thead>
+<tr>
+<th align="left"></th>
+<th align="right">Coefficients</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">(Intercept)</td>
+<td align="right">-2.0841861</td>
+</tr>
+<tr>
+<td align="left">age</td>
+<td align="right">0.0781423</td>
+</tr>
+<tr>
+<td align="left">milocOther</td>
+<td align="right">0.4026548</td>
+</tr>
+<tr>
+<td align="left">milocAnterior</td>
+<td align="right">0.5773049</td>
+</tr>
+<tr>
+<td align="left">pmiyes</td>
+<td align="right">0.4677806</td>
+</tr>
+<tr>
+<td align="left">kill</td>
+<td align="right">0.7665919</td>
+</tr>
+<tr>
+<td align="left">pmin(sysbp, 100)</td>
+<td align="right">-0.0774778</td>
+</tr>
+<tr>
+<td align="left">pulse</td>
+<td align="right">0.0182409</td>
+</tr>
+</tbody>
+</table>
+<p>We use this model to predict the outcome in the validation sample:</p>
+<pre><code class="language-r">  val_data$pi  &lt;- predict(model, type=&quot;response&quot;, newdata=val_data)
+</code></pre>
+<p>Let’s start with the conventional calibration plot for this model, which is an estimate of the average value of the true risk at a given level of predicted risk (using the <em>calibration_plot</em> function of the <em>predtools</em> package):</p>
+<pre><code class="language-r">  predtools::calibration_plot(val_data, obs=&quot;y&quot;, pred=&quot;pi&quot;)
+#&gt; $calibration_plot
+</code></pre>
+<p><img src="data:image/png;base64,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" alt="plot of chunk unnamed-chunk-7" />
+The model seems to be well calibrated. One issue with such a plot is that it generally requires binning (as done above) or smoothing. This is because predicted risks often have many levels, and within each level of predicted risk only a few, and mostly only one, \(y\) is observed. This requirement makes this assessment somewhat subjective: whether to use binning or smoothing. If the former, how many bins? If the latter, which smoothing method, and with which tuning parameter(s)?</p>
+<h2 id="objective-assessment-of-calibration-on-the-cumulative-domain">Objective assessment of calibration on the cumulative domain</h2>
+<p>The cumulative calibration assessment is based on the behavior of standardized partial sum of <strong>prediction errors</strong> (i.e., \(y-\pi\), after ordering the data ascendingly on \(\pi\)). The promise is that if the model is calibrated, the resulting partial sum, after suitable standardization, will converge to the Brownian motion in the [0,1] interval. This approach does not require any regularization.</p>
+<p>Details of such standardization is provided in the original publication. In brief, for the convergence to Brownian motion to work, the ‘time’ jump at step i should be proportional to the variance of \(y_i\), which, under the hypothesis that the model is calibrated, is \(\pi_i(1-\pi_i)\).</p>
+<h3 id="using-cumulcalib-package-for-calibration-assessment">Using <em>cumulcalib</em> package for calibration assessment</h3>
+<p>To assess cumulative calibration using this approach via the <em>cumulcalib</em> package, we use a simple function call and store the results:</p>
+<pre><code class="language-r">  library(cumulcalib)
+  res &lt;- cumulcalib(val_data$y, val_data$pi) 
+</code></pre>
+<p>Let’s explore what type of results this call returns:</p>
+<pre><code class="language-r">summary(res)
+#&gt; C_n (mean calibration error): -0.00156276638623442
+#&gt; C* (maximum absolute cumulative calibration error): 0.00200906446334097
+#&gt; Method: Two-part Brownian Bridge (BB)
+#&gt; S_n (Z score for mean calibration error) -1.00908104947695
+#&gt; B* (test statistic for maximum absolute bridged calibration error): 1.02844827843831
+#&gt; Component-wise p-values: mean calibration=0.312935765573505 | Distance (bridged)=0.240744428186226
+#&gt; Combined p-value (Fisher's method): 0.270143602790971
+#&gt; Location of maximum drift: 22402  | time value: 0.888235817046906  | predictor value: 0.333472525720666
+</code></pre>
+<p>The following elements are returned:</p>
+<ul>
+<li>
+<p>\(C_n\): sample estimate of mean calibration error ($E(y-\pi)$)</p>
+</li>
+<li>
+<p>\(C^*\) maximum absolute cumulative prediction error, divided by the number of observations. \(C^*\) is a ‘distance’ metric, similar to metrics such as Emax or the Integrated Calibration Index.</p>
+</li>
+</ul>
+<p>The other components in the summary depend on the <em>Method</em> requested for inference on model calibration. The default method is the Brownian Bridge test, which returns the following:</p>
+<ul>
+<li>
+<p>\(S_n\): the Z score for mean calibration error, obtained as \(\frac{nC_n}{\sqrt{\sum_1^n \pi_i(1-\pi_i)}}\). Note that the denominator is the square-root of total variance if the model is calibrated.</p>
+</li>
+<li>
+<p>\(B^*\): this is the maximum distance of the random walk from the line that connects its start and end (the bridge line, hence the ‘bridge’ test). Under the null hypothesis that the model is calibrated, \(B^*\) follows the Kolmogorov distribution.</p>
+</li>
+<li>
+<p>Component-wise p-values: These are individual p-values for each component of the test. The first one is the Z-test for mean calibration (testing if the average predicted and observed risks are equal). The second one is the test of the deviation of the random walk from the line that connects its origin and end (bridged distance).</p>
+</li>
+<li>
+<p>Combined p-value: This is the unified p-value for moderate calibration (based on Fisher’s method)</p>
+</li>
+<li>
+<p>Location of maximum drift: This provides information about the location that the maximum drift of the random walk occurs (corresponding to \(C^*\)). The rank of the observation, time, and predictor values at this point are reported.</p>
+</li>
+</ul>
+<p>Note: the Brownian bridge test operates by combining two statistic: \(C_n\), and maximum absolute deviation of the random walk from the line that connects its origin and end points. The test statistic related to the former is , and \(B^*\) for the latter, which has a Kolmogorov distribution under the null hypothesis. Because it can be shown that these two statistics are independent, one combined p-value can be generated using the Fisher’s method.</p>
+<p>Based on the above results, both mean calibration p-value, and the bridged random walk p-value show that the data are compatible with the model being calibrated in this sample. Indeed, the combined p-value of 0.2701436 also indicated lack of strong evidence against the model being calibrated for the US population.</p>
+<h3 id="graphical-assessment-of-calibration-using-cumulcalib-package">Graphical assessment of calibration using <em>cumulcalib</em> package</h3>
+<p>The returning object from the function call can be directly plotted:</p>
+<pre><code class="language-r">  plot(res)
+</code></pre>
+<p><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAWgAAADYCAMAAADxhokmAAAAjVBMVEUAAAAAADoAAGYAAP8AOjoAOmYAOpAAZrY6AAA6ADo6AGY6OmY6OpA6kJA6kLY6kNtmAABmADpmAGZmOgBmtrZmtv+QOgCQOjqQOmaQkDqQkGaQtpCQ27aQ29uQ2/+2ZgC225C2/7a2//++vr7bkDrb25Db/7bb/9vb////AAD/tmb/25D//7b//9v///9OqdesAAAACXBIWXMAAAsSAAALEgHS3X78AAAPlUlEQVR4nO1di3YbtxGF4layHTdUnEpq64ZsbSaVKGn///OKNwbvARa73AfuSUQaxADYy+FgMAPskqFjFpBrD2Av6ETPhGUQ/fqRUBzc4vfHh9fP32UV9UZ94jZhfb48LIRoxtLbr0enGNLZiW4BzhLT359/++n72z35ifF+T/76G9do+u7m36zQ+oRKfXke3p+O7OfwwJpgdWV9Vu1C+MtCsCCiXz9Rzih/p8NwvuMvF8KIZtp7uf2DVrE+GRjJlOw/6Q9BsKyIFtXevn7ntReChRDNbfSD0EdKHCWJ8SRstDAK9K/9CS07H9h/FLTIEK2qeZboqlgI0dLAyh8+ITdHXnTiRFMLIYi2PmFlX/5HlXo4MRsBiBbV2Ld3sxyuF0j0V/4+pNHWJwOzHd++PL/dP9imQ1ZjuNw+X+Fqglge0dwEU4IsG/36+T/C+JpPWP0zdQk5vZ+O0macf1LVWM1OtAOLaOZkHJkTAr2O4/sj9zrMJ7z+pyNjW1Wk7/729btq4NS9jj2iEz0TOtEzoRM9EzrRMwFFNJ3GpZ8k3+mCeCjHk9GRID8gFBeii45c2MLIyOGIymciFps5IREpUT3I/hBCoHZSSAFDNGNGRA3kO11wifbgyQzMD3sALxgh7hnfPnPXLRK2MDJyOKBy1I02QqwH4YWD/rJCdI1Eq6mXlJAGhmi21BKqK9+pgtPNt5hGezL0i/+ZO7/yBSXEVt9yoRf77RgZMBzZSDTaYYQujLnTgxQC/aWEeLVfj/AlJqSBIVo26PUwJEyHJ0PXy78/8pDb71HT4QkBZYlptJEBw5G/oGjszhJS73IaHaOhnUazX6DoQb4zBVGiPZnhfODGWb4ghZRZfP0Yiw8ZGT0cWTkRvrOE3h8PWgga/LgQtxk3R/mSFNKYTaPpCw9aiBesEF1iX8Q0EKMtqNG8IBHogEJv9zKFZveXFKLT3y9PR/mSFNIYZaMTRHsywgs4yBekENS8U/jrATYaDOckEgj5Kxp4rkEJWZqe7AkEGZNCGjiv46CdgYPwOlRBlGhPZkC4d56QVJbUpRgZORxVmeVf8lckeZZCSeU0QtwS3qmXdhotjZAMpBX50UAG70cDoQsP4TOnOBrDNzJyOLJyUsm0kHK3pdAl0RHoiVaTowODTKOvDGeCIPrCv9cFRW+3B070wvKYm4QgOruu6RgLYTrOcU+oow0k0d1GT41uo2dCt9EzodvomSA0+r7IRscXOTWfNG5uto4K13o1K8NFX38neqbmFk10Nx1tm8vURs+Ii77+FRCNdvIWff0rIDofvM72sIDrXzTR0kZH4/HoHhZw/YsmGlu3w8FURBfU3QUQhOiUilyC3z6f86ajE+0gT4gJ16noHUsB586edqIdIIjWnpyK3smthKh2X15GDG5LQGieXpyowP/N8VJkOhjZuyccQ7Rto+vb3TXhxTa6Qbuc8IK2NoG8l+fYaGy7uQp70+5yG92sXY7dmBOE6biP22hxp4FQzLTUvds84eVa+v5Ibv8UdlttQQzsLq71ozdLeDHR74+H1y/PglplvgNB07ELls1NmMWmg91X5MuzoHYCjbawJe3GEsJmRKDR8sBLPK/Vcgm+CXOCJYSpsLbRJH/gZYpYx6oJxxJyabAybIVV2m+0jX5I1AWTYU2cuwpr0+5iLX27R90SZ64w6WrMiUeIVODQDCfrslVK9h5xc8ejF0+4T4g4HAqgUyolWfDpbUcYiyU8wIezA9qkVIo0+soplsVNmKgMi0ypeDY6ZWaWkMtaknajAv8ypYIwM6bdJRAtsQhzUhiRe/v6X2sxGD1oMYODV4yrEu7R0Sh+sUSiFa5iv333LhORE+XZTY5LJppjbu0u1Gg9/eVWLYsnWmI2c+LTkYnIITfsroVohckJR9ChUyqlmxyrB3VFTEZ4ng2TUlEbaCIKb7e7UqIVmk+YfrDNde9MSkXtvbvc5W+Iv3aiOVpqd34yNCkVZaPlvfPT7W6BaIkm5gTh3umUikhlPR3ZYzaymxw3RLTCKMLLFyzshlzRe3eZultkWqLKfhe7d9h2N0w0R6l2Y1JZSrcxxNUe21gr0OYEQ4YKQJNkYNRpdydEK2QJxyRcGYqz4HtjWiJKeKFGo7FXohW8CbPYRiMP3e+daA6o3ZVbcbOH7jvRBpzsnB8NUyqgLmpl2IkGKA78CyC2G3SmLeRXhialAm109vhbJ9pGbmUIUyrlXkcnWqP45CzybrudaAflmxzhBoOEh9KJtlF8chZOkqlIn2K6ky2AOjkrUyoylWVc6JSHYojuTDOgbLRMqXg5Q5xGdxPCgEjO6pSKb6MTsWtiUd1uwGsFggKdUinc16F1uTM91Jycxd1bEBK9vu00E6DiDItvLUKHhSR+dDB8yN5GAqZUKlaGtGHaDf03/7NffJjs7CBxv0Gya8IriLZMR3ZlSECBfLNLwjFEB+/XIWZEjB9tSpwauyIcr9H60L2AvR09tTI0JdaLwS4IxxNtVoYcF/TKEJSYD0I9/Ngy13ii9XYDK/CfXRlaRZFyC9wZQo5pRSiw0alD9wEEiSb8j1nGJOQ3Rvjk7p1fNJglOWa5uBHCA0T7m76cu+2ys53n7FMmQyYC6DJ/U7IuXznhIY12T8P6d9sdUo81VXUjRMO3NQGQ6xBeqhYegqbDPXRv5wyFp5F4vLMaWmjOI/DjUaGmedkmJO4toYCy0c6dHLltyT8IODewbIUc5vS/tbMKf5Elg8cRHVgZIoeWqdHk9ilzEE401WrZBd/zf6f3SIeI9k5l1d1tN/+dk7IWc5iScGHm7Mncef+SvJYA0ZGdSqK7gqGhfltT5AOmIFxbjAEmMsYR7ccv6u62iyR6usxLM+/EMnHCWZLrAF1A371ooxK6LJRGJ+62GxoVAKo6otERaOAOWlcC50TLRX2BZd5lhWx08lRW8zMscyUTRxAeJXqwiYaxHOs7GOqW4CdmSVBHlJdEtEIF4c6FuL6HLFZEa522VjkVgX/8jVFwFLZnGtUgnnB3gJBdSPSgJkj1X47ocHoK3m134PfCyw0Py2AzovXcVNJJlnDvOuBqHHz24ni09jyFmQwFnLvtIu57hyaaNHKoVWDQ6thoWRoxtoPXAdjUZS+OubRnxcB2g0h6quacIbqmGvE4MyIdK9kz0WVqzso07vvf6ptD9f4yONoPHcES96488F9Qk4wlWnOsrg9cJ/ADME1pwlUzOPhED2pqHCrcu8F6mEICeKJVaGyoJ1oTS4gVlzBvK+KyPzjXaBflRY7EGdgQJzoONRnqhymk93Xg260iwm6AmK/LWjWpVQX82FxMtk2CXtJHg0p4onVKRbl3qIcpFBJtxWkKoSShMwDsCPC1PBOabNOukCE8TjRrKUG0ngxNSgVo9Dn7eJASzsYTrZ1YUaD+ArIE3ZZQuDezwguTE3EH42HSDNEaJqUC3DuhwkmNzjYMKos/2OkqKB4sdp0NMOcmidY/hCg8/3s80SalUjRx1pnbGrGi344UCP9+iPFesG1qwsuJbvP8q3qiiyULjZQ+VuPTCRyVwjEMP16iK0zWJX5lKCQGpsRsCY6IdZQOVclNTDSBGut0Fv0G8Agu6QlBBf5NfVH+T/oV2J82fFYWvMjEXBWsj2weiMh3xPp0FNEKFuFBorMaTd27z4gbDNaOUKcvwldLlHsBPOai5i13QkorutX70TQbCLZDRGPutvt2//cY0cTRmWIQYCrD7Q+AoPKuPGOh/qqWGrLMwVeYea/DO8MidPmUzbCMGBqJf1tEc6JqFHfkT4CuQZkAqHHqlEqxa1wLddm+/wVYacSNMctTEh0lxDvwLePR9sMU8k8hqh6U+UnDcm1T9CJ7PPSPpLnRsLsJFwOiTUrFr5t4PMjYcWlTbC+bB73ibnXjBPV1TUozhmiTUgnUjT8epMnAtNZqrRvUd9AwBTYxxbKXsrr47QajRgXaAR5BSZRzcSif4JDbDWoH5LZDjDmeR/UmAmLs9sMU/O0GwVP47Yi2lHq9yA/eeZiCv91gUqJ5W0EXZGXID955mIK/3WAGosXfdROddfydhylg2x09sjmanBE4Gw0epoC9A824YW0PxVr6/pTbaVDc7i5QTDT2/tEjxrRJFEfvGrW7O0xFXifaQTl5yIeS1Q9pm0AQ4tybNP1QsnaB4o3BJ+T1Izmc7HOG8N6k2IeStR7o2hFMzrJEFV2kiALn3qTYh5K1H+q64RHCGL0cwMLEuTcp9qFkrQe6dgQ1mkFrtHNv0tp2947QdgPG9HnslrD6IW0TS8+wbAYIQuyN6DNnWDaDoHtnqayzER17oLPtMNeP6GQIHu5rbUS3MixttvjuAkH3Dr56G9FBhiX7fNoOjbxGJ+rinqvVwRBy79DmoGs0HllC3u7vmCk2pgM+wqnNE5d3gSwh1JtjimuCSve5B7/h2t0bcu4dM7/MtTOP2evJ2Srk7C7jlflyJqh08uNJicnww4f+P/vf39fhehKnB+45n4zp6EvwGmQ9CUrs7TObEXHk9QxLBKPcO2bPWRCk+9F5jErOMu1nhqUTnUf5BhqQnJUntO4ST63oUIixGj85a5Kz0p6f/xLPIMa/yJpPGjc3W0eFP3A/OSsOhgfTMSOG1Ynmf3HJ2XwPC7j+6xLdNsa86Ou/KtGIQ/fDkD/DMmZY+yA6HWOGD75X6ERXNYfTaIhOdF1zPcZ8dTCiQR6gYyowokEeoKMBYmcHYR6gowFSRKs8QEcDRE/DgjxAx1QQk6HOA3RMhe7ezYRO9EzoRM+EYqK5QU8Vop0XI3RBPEzRlTmHV7pJIZGxQ20WMh3FlnKFTlop0cGVDSy8YC/fCLEh41ZLoKMTii93dIjnkDoybBdX6Ak16OuUKCVarW5ihaebb8hv2m4Jpx9GBnlDBq+j6C3QYjLsgFVACH+dEqVEB/u1CrE/KbslnEYbGR4mwym11REyzmBkIkRPbjrYL8/r1yrEDgAKvX7MPivbkXn9dMRqNewIqdBAhpuO0OgmJnoqjcYx4PSOs9NQCGehLRk6Gf4S+kYnJjpno/EDcFpCkVYjYwkFdnMiOgqG2yb3Og4hrwMUYgdghILmCCHz/g9UT2B06CnUyLCBBQ37xESn/Gg5TZf50dy3IwRno6tkgBDWREOZCwlc8DA90R116ETPhE70TOhEz4RO9EzoRM+EVRDNj6pTL+uPFaePV0H0UOy1Lg+rIpr+eX/6FyEHsZmbLirWs7tqdUQ/su1rd/zfp0A0YLFYHdFPIjxKF9NsPb2e3VVrJprF/rHxjqtjzUSvRpsZVkw0s9HYQP71sWaiqe1YjeVYDdGrRyd6Jvwf+1Y9Py+bbhEAAAAASUVORK5CYII=" alt="plot of chunk unnamed-chunk-10" /></p>
+<p>The X axis is the ‘time’ value (running from 0 to 1). The corresponding predicted values are shown on the second X-axis on top. The default Y axis is the standardized sum (cumulative sum divided by the square root of the sum of variance of predicted risks). The second Y axis provides ‘scaled’ cumulative sum (divided by the number of observations). This means the terminal value of the random walk can be marked on the second Y-axis axis to identify mean calibration error.</p>
+<p>The blue and red vertical lines, respectively, show the terminal value of the random walk and its maximum bridged deviation (given the default method, Brownian bridge, is used). The dotted lines of the same color mark the critical value of the test (by default at 5% significance level, see the documentation for the cumulcalib() function on how to disable inference lines or change significance level).</p>
+<p>Here it is obvious that neither the terminal value (mean calibration error) nor the maximum deviation reach statistical significance.</p>
+<h2 id="how-do-different-forms-of-miscalibrations-look-on-the-cumulative-calibration-plot">How do different forms of miscalibrations look on the cumulative calibration plot?</h2>
+<p>The above results present how a calibrated model will look like. Let’s test how different forms of miscalibration present themselves on the cumulative calibration graph.</p>
+<h3 id="a-model-that-underestimates-the-risk">A model that underestimates the risk</h3>
+<p>Let’s start with a model that under-estimates the risk. We mimic this by applying an odds-ratio of 0.75 to predicted risks.</p>
+<pre><code class="language-r">  val_data$pi2 &lt;- val_data$pi*0.75/(1-val_data$pi*(1-0.75)) #One-shot transformation of risk to odds and back
+  res &lt;- cumulcalib(val_data$y, val_data$pi2) 
+  predtools::calibration_plot(val_data, obs=&quot;y&quot;, pred=&quot;pi2&quot;)
+#&gt; $calibration_plot
+</code></pre>
+<p><img src="data:image/png;base64,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" alt="plot of chunk unnamed-chunk-11" /></p>
+<pre><code class="language-r">  plot(res)
+</code></pre>
+<p><img src="data:image/png;base64,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" alt="plot of chunk unnamed-chunk-11" /></p>
+<p>As can be seen above, when predicted risks are systematically smaller than actual risks, prediction errors are generally positive, resulting in a generally ascending curve. Clearly, the Z-test component of the bridge test is rejected at 0.05 level (the corresponding p-value is 4.6582653 × 10<sup>-20</sup>). However, as can bee see by the red markings on the graph, the bridge component is not affected by such systematic error (the corresponding p-value is 0.2022575). As the overall p-value for moderate calibration is affected by both, it remains significant (p-value: 0). As such, the null hypothesis that the model is moderately calibrated is rejected at 0.05 significance level.</p>
+<h3 id="a-model-that-overestimates-the-risk">A model that overestimates the risk</h3>
+<p>We mimic this by applying an odds-ratio of 1.25 to predicted risks.</p>
+<pre><code class="language-r">  val_data$pi2 &lt;- val_data$pi*1.25/(1-val_data$pi*(1-1.25)) #One-shot transformation of risk to odds and back
+  res &lt;- cumulcalib(val_data$y, val_data$pi2) 
+  predtools::calibration_plot(val_data, obs=&quot;y&quot;, pred=&quot;pi2&quot;)
+#&gt; $calibration_plot
+</code></pre>
+<p><img src="data:image/png;base64,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" alt="plot of chunk unnamed-chunk-12" /></p>
+<pre><code class="language-r">  plot(res)
+</code></pre>
+<p><img src="data:image/png;base64,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" alt="plot of chunk unnamed-chunk-12" /></p>
+<p>Here, the opposite happens: when predicted risks are systematically larger than actual risks, prediction errors are generally negative, resulting in a generally descending curve. Again, the Z-test component of the bridge test is rejected at 0.05 level (the corresponding p-value is 5.1912618 × 10<sup>-19</sup>), but the bridge component is not affected by such systematic error (the corresponding p-value is 0.4221737). Again, as the overall p-value for moderate calibration is affected by both, it remains significant (p-value: 0). As such, the null hypothesis that the model is moderately calibrated is rejected at 0.05 significance level.</p>
+<h3 id="over-fittedd-model">Over-fittedd model</h3>
+<p>To demonstrate how an over-fitted model might look, we refit the model based on only a sub-sample of 500 rows from the development sample. The intuition is that because of the small development sample, the model might not be calibrated. In particular, it might be over-fitted.</p>
+<pre><code class="language-r">  dev_data2 &lt;- dev_data[sample(nrow(dev_data), 500, replace=F),]
+  model2 &lt;- glm(y ~ age + miloc + pmi + kill + pmin(sysbp,100) + pulse, data=dev_data2, family=binomial(link=&quot;logit&quot;))
+  val_data$pi2  &lt;- predict(model2, type=&quot;response&quot;, newdata=val_data)
+</code></pre>
+<p>Let’s look at the calibration plot</p>
+<pre><code class="language-r">  predtools::calibration_plot(val_data, obs=&quot;y&quot;, pred=&quot;pi2&quot;)
+#&gt; $calibration_plot
+</code></pre>
+<p><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAWgAAADYCAMAAADxhokmAAAAgVBMVEUAAAAAADoAAGYAOmYAOpAAZrYzMzM6AAA6ADo6AGY6OgA6OmY6OpA6ZmY6kNtmAABmADpmAGZmOgBmOpBmtttmtv+AsdOQOgCQOjqQOmaQtpCQ2/+2ZgC2/7a2/9u2///bkDrbtmbb25Db/7bb/9vb////tmb/25D//7b//9v///+uLOt/AAAACXBIWXMAAAsSAAALEgHS3X78AAAIKUlEQVR4nO2dfWObNhDGlcxO0i2zm27G3ezOXrqAc9//Aw4wtgSWQW9IJ+mef+o2Cpx+eXqcBDkYkLyIhQ4gFxFoTyLQnkSgPUkdNP1IBOnDINAGYgYsCLS+jEgQaF2Z2BkItLZMMRBoLRnaGQi0niwYSL/1tGaLj/ZTydjjwfokicjcziDH97ndwHHZfKq+HLpPBFoDQKH43ae3Q4v4rMunzEHr2FkVdPX6Aaevu+5vraOfnp7yBq01e1XQ5YKDrp4fdganSkya2dnM0ZdPGYPWnbpZjob9xuhsyUi/2FAF/blddbWGmERyBW0wb1XQXR3d1naM5Z2jjWpnZdDyUxqcMXoZTbog0JoyWwoWhYw0gb4vwxkTaD2Z72xQ6tCRzXQJtLKsNuoItLIs50qg1WRnZyDQirKfKIFWkLWdgUCryMksCfSUXNgZCPSk5pwigb7KkZ3vHX2GkXFq5vkR6LPmtTMQ6E7zT45Agwc7A4Fu5GVmBNqHnYFAe5tW5qA92RlyB+1xTjmD9mdnyBq03wllC9qrnSFf0N5nkydo33aGTEGHmEqGoAPYGXIEHWgeuYEOY2fIDnS4SWQFOpidIS/QQWeQD+iQdoaMQIcOPxPQge0MuYBGEHsOoMPbGbIAjSPw5EGjsDOI+I6M8b4+oyNjEpqor4HwvhFTIyMSFjuDCPqNm5k3r6qeGdsMRsYjTCHzWLq2HCA2r2psXr1E2kYCkZ1BdPT6mqN5Y5SywR1pYxRk8crCkbT6ia55FS47gwi6sfS56BD7zrTtaAYjIxC+YK8RNYm5Rdx39Gm9Go7EL3R2hmHVcS49hOZV1fPmZiR6oYxU5mjevErgjDN8iTDaGeQ5mjevaleLLKqqA2uYie11ILUzXPGd3n6sE9jrQBxjSo7Ga2eQVx0TI7EKd4BddJ/b9rJ32UsaGYlVqO0Md3bvxkeiFO7oIJWNf+x2hv7G/35TLhVG4hPi0K4SU8dxFeXFMAI7g7gE/74rlzGCxhrXQDzMcvHflq1URmJSHHaG6BcsKIOSSriVNeLm3kg8isbO0MNX13cjRQdC0PgiGlE/2DKiOjomO0PEjkYWzqQizdGR2Rli3evAFIuiYgQdn51B/kjY1MjAQhOIlmSPhE2MDKso7QzxrQxxRGGg3uMGf34feUYawxRjtTP0H6DZb5qHwSZHhhOCEIwlVh37Dept0ojtDENHl4hvzoY+v6Wkj4RNjAyhuO0MuKsO4eVesWPu3WFZ1p4eWbQEmOsFdPR2hv49w+MSWdVRBDuze/WqDmx3wVvQKdgZREf/9ePrDqGj08Dcy9Fs8XPst2eDXAwTsTOgrjqKokgG87COHlmvBADNmOylU5FK9stCEyN9iUlfkhur0D6I3mTnJEG3d1jwPE3ani1B0Of7K2jusHTFRoKgnY601uVUBHpW8do5SdBNr5mHsW4/vkDz8yRZdbRP3Z3WwXfv0lkKDnT59bfzbdngex2pYhZ+Rfkg/DE2ctZg0uUsdzTvEgaXxh0+QCeMWZ6jeZewZk/v0RPolO0M8qpD6ECzf/jbk6PTxiyfX69L2Jn43F3CErczyEH3uoR5ydHJY1Z29J2RjmLIgLMUn5Cj3YO+Xe7lgFk+S94lDGZw9AB0FnaGO/iuXcJgdtCZYA6xeyeCzsXOEAC0mKPzwewfdFEUKT1Rp65woLPCHC515GVnCHYxzA1zINDZ2RnCgM4QcwjQOdoZAoBO6cFFHXkGnamdYVbQkscyssU8r6OHoPO1M3gFnTNmj6kjazvDnKCF7SOD705OfkDnbmfwlDoIs5eLIdm50fygCXOruUGTnTvNnKMJ80Wz7nWQnbncgh6sUXSDSVmOHS0uUYizqNkcTZj7cgpaeJaAOA80D2jCfKM5UgfZWSInoHlqTqkLkluZgi7kf0upC5JbOQF9dXRSXZDcyhB0b2VCxYaCzEBztM2fVGwoyAVoKjYUZJk6OuJUbEzK8mJ4Bp1Uy8WZZFtHU3ZWlPWChW6jqMkYdG3lLmuQnVVknKPPArKzoqxBE2Y1WaYOsrOq7EATZmVJUfHmVUIbq9uRZGcNyVjx5lViG6ubkYRZRzJavDGK2CJlMJLsrCcZLt7q5/rppnkVYdaUDBhvXiW2sRJHkp21pejo/kjCrC+DHE12NpG86lhdqw7exoqJemJulfLx7oMWmleJ7WBFPbn4IWd1PMM0gG8i2I9H+daTCLQnEWhPItCepAlauq9nIWmTeyfHaxqPj7yDQ/t45fg7pielB1q+r2cueZN7F8dr1rPVy9h7ZfSO17jAar56oOVrRnPJm9y7OF77erW9raX7s7Sarx5o+S6IueQtwR0dz3V8Ph0t39czl7zJvaPjNfsHDo9XPY++4WpK6Tr6tLbm7PJ/CJoc7QS0cLzq2b7mGM7SJufrVh2yfT1zyZvcuzieE87C8axTpVEdPbavZ3o8l3V0faRju0NpDZvHd5x4C+GUaGXoSQTakwi0JxFoTyLQnkSgPSku0JJXPX9uN5c35Z7++Bh7aW5YRQa65lj2y/dmJ1P4KlrFB7p6ff/t2+OhZKxesh3ZL98aR9dWf/xnyxbvrx/1ymIF1e9rZr1udar4QJeL95dd+2m/qZds9Vq7ev1ZL46Pywb46/uXQ71Urr8w9kboAIoMdJujW9zNCnt1XDU7PTXdNmm0oP9dnv/po3sxNBZFBvoC9HwHBQj0TOKgq5ddU2/UGWLdpY6ySdDX1EGgrcRBw+Vi+PDr5WJYM+8uhhsg0NmKQHsSgfYkAu1JBNqTCLQnEWhP+h8aRe6R1nEgswAAAABJRU5ErkJggg==" alt="plot of chunk unnamed-chunk-14" /></p>
+<p>The model is indeed not as well calibrated as the model based on the full development sample. Let’s repeat the cumulative calibration exercise</p>
+<pre><code class="language-r">  res2 &lt;- cumulcalib(val_data$y, val_data$pi2)
+  summary(res2)
+#&gt; C_n (mean calibration error): 0.000155141189372822
+#&gt; C* (maximum absolute cumulative calibration error): 0.00834106759839242
+#&gt; Method: Two-part Brownian Bridge (BB)
+#&gt; S_n (Z score for mean calibration error) 0.106201501405016
+#&gt; B* (test statistic for maximum absolute bridged calibration error): 5.66522040991453
+#&gt; Component-wise p-values: mean calibration=0.915422479736339 | Distance (bridged)=0
+#&gt; Combined p-value (Fisher's method): 0
+#&gt; Location of maximum drift: 18992  | time value: 0.420294629063076  | predictor value: 0.106004714711078
+</code></pre>
+<pre><code class="language-r">  plot(res2)
+</code></pre>
+<p><img src="data:image/png;base64,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" alt="plot of chunk unnamed-chunk-15" /></p>
+<p>Here, despite the fact that average predicted risks are close to the average actual risks (notice the terminal position of the random walk), miscalibration is quite obvious: the model seems to be making under-estimated risks at low values (the increasing trend of cumulative prediction error), followed by overestimating the risk later (the declining curve). This inverse U shape is a typical signature of an over-fitted model.</p>
+<p>If we repeat the similar steps for inference, we will obtain the following p-values: 0.9154225 for mean miscalibration, 0 for the bridge component, and 0 for the unified test. Unlike models that systematically under-predict or over-predict the risk, here it is the bridge component of the test that catches the miscalibration.</p>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-core.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/plugins/autoloader/prism-autoloader.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/combine/npm/katex/dist/katex.min.js,npm/katex/dist/contrib/auto-render.min.js,npm/@xiee/utils/js/render-katex.js" defer></script>
+</body>
+</html>
