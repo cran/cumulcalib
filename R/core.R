@@ -16,13 +16,15 @@
 #' summary(res)
 #' plot(res)
 #' @export
-cumulcalib <- function(y, p, method=c("BB","BM"), ordered=FALSE, n_sim=0)
-{
-  out <- list()
-  methods <- list()
-
-  if(!ordered) #Order ascendingly based on p, if not already ordered
-  {
+cumulcalib <- function(
+  y,
+  p,
+  method = c("BB", "BM"),
+  ordered = FALSE,
+  n_sim = 0
+) {
+  if (!ordered) {
+    #Order ascendingly based on p, if not already ordered
     o <- order(p)
     p <- p[o]
     y <- y[o]
@@ -31,103 +33,219 @@ cumulcalib <- function(y, p, method=c("BB","BM"), ordered=FALSE, n_sim=0)
   n <- length(p)
 
   #The time component of the random walk
-  T_ <- sum(p*(1-p)) #Total 'time'
-  if(T_<30) warning("Total obsered time (sum(pi*(1-pi))) is less than 30; the data might be too small for reliable inference.")
-  t <- cumsum(p*(1-p))/T_ #time values at each p
-  X <- p #Predicted values
+  T_ <- sum(p * (1 - p)) #Total 'time'
+  if (T_ < 30) {
+    warning(
+      "Total obsered time (sum(pi*(1-pi))) is less than 30; the data might be too small for reliable inference."
+    )
+  }
+  t <- cumsum(p * (1 - p)) / T_ #time values at each p
 
   #Scaled cumulative sum (divided by n)
-  C <- cumsum(y-p)/n  #Scaled partial sum of prediction errors
+  C <- cumsum(y - p) / n #Scaled partial sum of prediction errors
   C_n <- C[n] #Mean calibration error
-  C_star <- max(abs(C))  #Macimum distance
+  C_star <- max(abs(C)) #Macimum distance
 
   #This is the S process as described in the paper. The function returns all these metrics regardless of which method is used. But inference is only done per specified method(s)
-  scale <- n/sqrt(T_)
-  S <- scale*C
-  S_star <- scale*C_star
-  B_star <- max(abs(S-S[n]*t))
-  S_n <- scale*C_n
+  scale <- n / sqrt(T_)
+  S <- scale * C
 
-  #Inference part. We loop over the different methods requested by the user
-  for(i in 1:length(method))
-  {
-    mt <- method[i]
-
-    if(mt %in% c('BM2p','BB')) #Two-part BM and BB both generate component-specific p-values
-    {
-      stat1 <- S[n]
-      pval1 <- 2*stats::pnorm(-abs(S[n]),0,1) #Two-sided z test for mean calibration
-
-      if(mt=='BB')
-      {
-        loc <- which.max(S-S[n]*t)  #The bridge component of the BB test
-        stat2 <- B_star
-        pval2 <- 1-pKolmogorov(stat2)
-      }
-      else
-      {
-        loc <- which.max(abs(S))
-        stat2 <- max(abs(S))
-        pval2 <- 1-pMAD_BM_c(stat2, w1=S[n])
-      }
-
-      fisher <- -2*(log(pval1)+log(pval2))  #Fisher's method for combining p-values
-      pval <- 1-stats::pchisq(fisher,4)
-
-      methods[[mt]]$stat <- fisher
-      methods[[mt]]$pval <- pval
-      methods[[mt]]$stat_by_component <- c(mean=stat1, distance=stat2)
-      methods[[mt]]$pval_by_component <- c(mean=pval1, distance=pval2)
-      methods[[mt]]$loc <- loc
-    }
-
-    if(mt %in% c('BM','BB1p'))  #These are one-part methods
-    {
-      if(mt=='BB1p')
-      {
-        S2 <- S-S[n]*t
-        loc <- which.max(abs(S2))
-        stat <- max(abs(S2))
-        pval <- 1-pKolmogorov(stat)
-        methods[[mt]]$stat <- stat
-        methods[[mt]]$pval <- pval
-        methods[[mt]]$loc <- loc
-      }
-      else
-      {
-        stat <- max(abs(S))
-        loc <- which.max(abs(S))
-        pval <- 1-pMAD_BM(stat)
-        methods[[mt]]$stat <- stat
-        methods[[mt]]$pval <- pval
-        methods[[mt]]$loc <- loc
-      }
-    }
-  }
-
-  out$data <- cbind(X=X,t=t,C=C, S=S) #Returns the generated random-walk
-  out$method <- names(methods[1]) #The base method is the first requested one
-
-  out$scale <- scale
+  out <- inference(t, S, method)
+  out$T <- T_
   out$C_n <- C_n
-  out$S_n <- S_n
   out$C_star <- C_star
-  out$S_star <- S_star
-  out$B_star <- B_star
-
-  #Copy the first method results to root of the list
-  for(nm in names(methods[[1]]))
-  {
-    out[nm] <- methods[[1]][nm]
-  }
-  out$by_method <- methods
-
-  class(out) <- "cumulcalib"
+  out$data <- cbind(t = t, S = S, X = p, C = C) #Returns the generated random-walk
+  class(out) <- c("cumulcalib")
   return(out)
 }
 
 
+#' Cumulative calibration assessment for individual treatment effect (ITE) predictions
+#'
+#' This is the core function for performing cumulative calibration assessment for
+#' models that predict individual treatment effects (treatment benefit).
+#'
+#' @return an objective of class cumulcalib that can be printed or plotted
+#' @param y vector of binary responses
+#' @param h vector of predicted treatment benefits (the predicted reduction in outcome risk due to treatment).
+#' @param a treatment indicator (1 if treated, 0 if control).
+#' @param p optional vector of predicted baseline risks (the risk without treatment). If omitted (NULL), the marginal test is performed using observed event rates in the treated and control groups; if supplied, the conditional test is performed. Default is NULL.
+#' @param method string with either BB (Brownian bridge test, default method), BM (Brownian motion test), BM2p (two-part BM test - experimental), BB1p (one-part BB test wit only the 'bridge' component). Multiple methods can be specified. The first one will be the 'main' method (e.g., when submitting the resulting object to plot()). Default is c("BB","BM")
+#' @param ordered if TRUE, the data are already ordered based on ascending values of h. This is to speed up simulations.
+#' @param n_sim if >0, indicates a simulation-based test is requested for inference.
+#' @param aux if TRUE, auxiliary quantities (used internally and for diagnostics) are returned in the result. Default is FALSE.
+#' @examples
+#' p <- rbeta(1000, 1, 2)
+#' a <- rbinom(length(p), 1, 0.5)
+#' h <- runif(length(p), 0, 0.05)
+#' Y <- rbinom(length(p), 1, pmax(0, pmin(1, p - a * h)))
+#' res <- cumulcalibITE(Y, h = h, a = a)
+#' summary(res)
+#' plot(res)
+#' @export
+cumulcalibITE <- function(
+  y,
+  h,
+  a,
+  p = NULL,
+  method = c("BB", "BM"),
+  ordered = FALSE,
+  n_sim = 0,
+  aux = FALSE
+) {
+  if (!ordered) {
+    #Order ascendingly based on Y, if not already ordered
+    o <- order(h)
+    h <- h[o]
+    y <- y[o]
+    a <- a[o]
+    if (!is.null(p)) p <- p[o]
+  }
 
+  n <- length(y)
+  k <- 1:n
+  k1 <- cumsum(a)
+  k0 <- k - k1
+  Y1 <- cumsum(y)
+  Y01 <- cumsum((1 - a) * y)
+  Y11 <- cumsum(a * y)
+  B <- k * (ifelse(k0 != 0, Y01 / k0, 0) - ifelse(k1 != 0, Y11 / k1, 0))
+
+  if (!is.null(p)) {
+    X_mu <- k *
+      ((1 - a) *
+        ifelse(k0 != 0, (y - p) / k0, 0) -
+        a * ifelse(k1 != 0, (y - p + h) / k1, 0))
+    C <- cumsum(X_mu) / n
+    sigma2 <- k^2 *
+      ((1 - a) *
+        ifelse(k0 != 0, p * (1 - p) / k0^2, 0) +
+        a * ifelse(k1 != 0, (p - h) * (1 - p + h) / k1^2, 0))
+    s2 <- cumsum(sigma2)
+    if (aux) {
+      mu <- ifelse(
+        a,
+        c(0, Y01[-n]) /
+          c(0, k0[-n]) -
+          k * (c(0, Y11[-n]) + (p - h)) / k1 +
+          (k - 1) * c(0, Y11[-n]) / (c(0, k1[-n])),
+        (1 - a) *
+          (k *
+            (c(0, Y01[-n]) + p) /
+            k0 -
+            (k - 1) * c(0, Y01[-n]) / c(0, k0[-n]) -
+            c(0, Y11[-n]) / c(0, k1[-n]))
+      )
+      mu[which(is.nan(mu))] <- 0
+    }
+  } else {
+    C <- (B - cumsum(h)) / n
+    s2 <- k^2 *
+      (ifelse(k0 != 0, Y01 / k0 * (1 - Y01 / k0) / k0, 0) +
+        ifelse(k1 != 0, Y11 / k1 * (1 - Y11 / k1) / k1, 0))
+    if (aux) mu <- h
+  }
+
+  #The time component of the random walk
+  T_ <- s2[n] #Total 'time'
+  if (T_ < 30) {
+    warning(
+      "Total obsered time (sum(pi*(1-pi))) is less than 30; the data might be too small for reliable inference."
+    )
+  }
+  t <- s2 / T_
+  S <- C * n / sqrt(T_)
+
+  #Inference part. We loop over the different methods requested by the user
+  out <- inference(t, S, method)
+  out$T <- T_
+  out$C_n <- C[n] #Mean calibration error
+  out$C_star <- max(abs(C)) #Maximum distance
+  out$data <- cbind(t = t, S = S, B = B, X = h) #Returns the generated random-walk
+
+  if (aux) {
+    out$aux$mu <- mu
+    out$aux$s2 <- s2
+  }
+
+  #Record which approach was used: marginal (no baseline risks) or conditional (predicted baseline risks supplied)
+  out$approach <- if (is.null(p)) "marginal" else "conditional"
+
+  class(out) <- c("cumulcalib", "cumulcalibITE")
+  return(out)
+}
+
+
+inference <- function(t, S, method) {
+  out <- list()
+  methods <- list()
+  n <- length(S)
+
+  S_star <- max(abs(S))
+  B_star <- max(abs(S - S[n] * t))
+  S_n <- S[n]
+
+  for (i in 1:length(method)) {
+    mt <- method[i]
+
+    if (mt %in% c('BM2p', 'BB')) {
+      #Two-part BM and BB both generate component-specific p-values
+      stat1 <- S[n]
+      pval1 <- 2 * stats::pnorm(-abs(S[n]), 0, 1) #Two-sided z test for mean calibration
+
+      if (mt == 'BB') {
+        loc <- which.max(abs(S - S[n] * t)) #The bridge component of the BB test
+        stat2 <- B_star
+        pval2 <- 1 - pKolmogorov(stat2)
+      } else {
+        loc <- which.max(abs(S))
+        stat2 <- max(abs(S))
+        pval2 <- 1 - pMAD_BM_c(stat2, w1 = S[n])
+      }
+
+      fisher <- -2 * (log(pval1) + log(pval2)) #Fisher's method for combining p-values
+      pval <- 1 - stats::pchisq(fisher, 4)
+
+      methods[[mt]]$stat <- fisher
+      methods[[mt]]$pval <- pval
+      methods[[mt]]$stat_by_component <- c(mean = stat1, distance = stat2)
+      methods[[mt]]$pval_by_component <- c(mean = pval1, distance = pval2)
+      methods[[mt]]$loc <- loc
+    }
+
+    if (mt %in% c('BM', 'BB1p')) {
+      #These are one-part methods
+      if (mt == 'BB1p') {
+        S2 <- S - S[n] * t
+        loc <- which.max(abs(S2))
+        stat <- max(abs(S2))
+        pval <- 1 - pKolmogorov(stat)
+        methods[[mt]]$stat <- stat
+        methods[[mt]]$pval <- pval
+        methods[[mt]]$loc <- loc
+      } else {
+        stat <- max(abs(S))
+        loc <- which.max(abs(S))
+        pval <- 1 - pMAD_BM(stat)
+        methods[[mt]]$stat <- stat
+        methods[[mt]]$pval <- pval
+        methods[[mt]]$loc <- loc
+      }
+    }
+  }
+
+  out$method <- names(methods[1]) #The base method is the first requested one
+  out$S_n <- S_n
+  out$S_star <- S_star
+  out$B_star <- B_star
+  #Copy the first method results to root of the list
+  for (nm in names(methods[[1]])) {
+    out[nm] <- methods[[1]][nm]
+  }
+  out$by_method <- methods
+
+  out
+}
 
 
 #' CDF of the distribution of the maximum absolute deviation of Brownian motion in \[0,1\] interval
@@ -135,13 +253,12 @@ cumulcalib <- function(y, p, method=c("BB","BM"), ordered=FALSE, n_sim=0)
 #' @param q the quantity at which CDF will be evaluated. Currently accepts only a scalar
 #' @param summands maximum number of terms to be evaluated in the infinite series (default=100)
 #' @export
-pMAD_BM <- function(q, summands=100)
-{
+pMAD_BM <- function(q, summands = 100) {
   pi <- base::pi
-  m<-0:summands
-  out <- sum((-1)^m/(2*m+1)*exp(-(2*m+1)^2*pi^2/8/q^2))
+  m <- 0:summands
+  out <- sum((-1)^m / (2 * m + 1) * exp(-(2 * m + 1)^2 * pi^2 / 8 / q^2))
 
-  return(4/pi*out)
+  return(4 / pi * out)
 }
 
 
@@ -149,13 +266,15 @@ pMAD_BM <- function(q, summands=100)
 #' @return a scalar value
 #' @param p the quantity at which the quantile function will be evaluated. Currently accepts only a scalar
 #' @export
-qMAD_BM <- function(p)
-{
-  x <- stats::uniroot(function(x) {pMAD_BM(x)-p}, interval=c(0,10))
+qMAD_BM <- function(p) {
+  x <- stats::uniroot(
+    function(x) {
+      pMAD_BM(x) - p
+    },
+    interval = c(0, 10)
+  )
   unname(x$root)
 }
-
-
 
 
 #
@@ -178,25 +297,22 @@ qMAD_BM <- function(p)
 #   1/(2*sqrt(base:::pi*x^3))*sum(A1*A2)
 # }
 
-
-
 #' CDF of the Kolmogorov distribution
 #' @return a scalar value
 #' @param q the quantity at which CDF will be evaluated. Currently accepts only a scalar
 #' @param summands maximum number of terms to be evaluated in the infinite series (default=ceiling(q*sqrt(72)+3/2))
 #' @export
-pKolmogorov <- function (q, summands=ceiling(q*sqrt(72)+3/2))
-{
+pKolmogorov <- function(q, summands = ceiling(q * sqrt(72) + 3 / 2)) {
   #if(!is.null(summands)) q <- q*(1+0.12/sqrt(summands)+0.11/summands)
 
-  sqrt(2 * pi) * sapply(q, function(x) {
-    if (x > 0) {
-      sum(exp(-(2 * (1:summands) - 1)^2 * pi^2/(8 * x^2)))/x
-    }
-    else {
-      0
-    }
-  })
+  sqrt(2 * pi) *
+    sapply(q, function(x) {
+      if (x > 0) {
+        sum(exp(-(2 * (1:summands) - 1)^2 * pi^2 / (8 * x^2))) / x
+      } else {
+        0
+      }
+    })
 }
 
 
@@ -204,13 +320,15 @@ pKolmogorov <- function (q, summands=ceiling(q*sqrt(72)+3/2))
 #' @return a scalar value
 #' @param p the quantity at which the quantile function will be evaluated. Currently accepts only a scalar
 #' @export
-qKolmogorov <- function(p)
-{
-  x <- stats::uniroot(function(x) {pKolmogorov(x)-p}, interval=c(0,10))
+qKolmogorov <- function(p) {
+  x <- stats::uniroot(
+    function(x) {
+      pKolmogorov(x) - p
+    },
+    interval = c(0, 10)
+  )
   unname(x$root)
 }
-
-
 
 
 #' CDF of the distribution of the maximum absolute deviation of Brownian motion in \[0,1\] interval, conditional on its terminal value
@@ -221,38 +339,51 @@ qKolmogorov <- function(p)
 #' @param exp_tolerance numerical tolerance as the stopping rule when evaluating the infinite sum (default -30 on the exponential scale)
 #' @param summands number of terms to evaluate (default is ceiling(q * sqrt(72) + 3/2))
 #' @export
-pMAD_BM_c <- function(q, w1, method=1, exp_tolerance=-30, summands = ceiling(q * sqrt(72) + 3/2))
-{
-  if(q<=max(0,w1)) return(0)
+pMAD_BM_c <- function(
+  q,
+  w1,
+  method = 1,
+  exp_tolerance = -30,
+  summands = ceiling(q * sqrt(72) + 3 / 2)
+) {
+  if (q <= max(0, w1)) {
+    return(0)
+  }
   out <- c()
-  if(1 %in% method)
-  {
-    A <- -2*q*q
-    B <- 2*q*w1
+  if (1 %in% method) {
+    A <- -2 * q * q
+    B <- 2 * q * w1
     C <- -exp_tolerance
-    D <- sqrt(B*B-4*A*C)
+    D <- sqrt(B * B - 4 * A * C)
 
-    n <- seq(round((-B+D)/A/2,0), round((-B-D)/A/2,0))
-    un <- 2*n*q
+    n <- seq(round((-B + D) / A / 2, 0), round((-B - D) / A / 2, 0))
+    un <- 2 * n * q
 
-    terms <- un*w1-un^2/2
-    out <- c(out,sum((-1)^n*exp(terms)))
+    terms <- un * w1 - un^2 / 2
+    out <- c(out, sum((-1)^n * exp(terms)))
   }
-  if(2 %in% method)
-  {
-    out <- c(out,sqrt(2*pi)/q*sum(exp(w1^2/2-(2*(1:summands)-1)^2*pi^2/(8*q^2))*(cos((2*(1:summands)-1)*pi*w1/2/q))))
+  if (2 %in% method) {
+    out <- c(
+      out,
+      sqrt(2 * pi) /
+        q *
+        sum(
+          exp(w1^2 / 2 - (2 * (1:summands) - 1)^2 * pi^2 / (8 * q^2)) *
+            (cos((2 * (1:summands) - 1) * pi * w1 / 2 / q))
+        )
+    )
   }
-  if(3 %in% method)
-  { #Wrong
+  if (3 %in% method) {
+    #Wrong
     n <- -1000:1000
-    x <- sum(stats::dnorm(w1+4*n*q)-stats::dnorm(w1+4*n*q+2*q))
-    out <- c(out,x)
+    x <- sum(
+      stats::dnorm(w1 + 4 * n * q) - stats::dnorm(w1 + 4 * n * q + 2 * q)
+    )
+    out <- c(out, x)
   }
 
   out
 }
-
-
 
 
 #' Quantile function of the distribution of the maximum absolute deviation of Brownian motion in \[0,1\] interval, conditional on its terminal value
@@ -260,275 +391,349 @@ pMAD_BM_c <- function(q, w1, method=1, exp_tolerance=-30, summands = ceiling(q *
 #' @param p the quantity at which the quantile function will be evaluated. Currently accepts only a scalar
 #' @param w1 the terminal value
 #' @export
-qMAD_BM_c <- function(p, w1)
-{
-  x <- stats::uniroot(function(x) {pMAD_BM_c(x,w1)-p}, interval=c(0,10))
+qMAD_BM_c <- function(p, w1) {
+  x <- stats::uniroot(
+    function(x) {
+      pMAD_BM_c(x, w1) - p
+    },
+    interval = c(0, 10)
+  )
   unname(x$root)
 }
 
 
+# Human-readable label for a method code (internal helper)
+.cumulcalib_method_label <- function(m) {
+  switch(
+    m,
+    BM = "One-part Brownian motion (BM)",
+    BM1p = "One-part Brownian motion (BM)",
+    BM2p = "Two-part Brownian motion (BM2p)",
+    BB1p = "One-part Brownian bridge (BB1p)",
+    BB = "Two-part Brownian bridge (BB)",
+    BB2p = "Two-part Brownian bridge (BB)",
+    m
+  )
+}
 
 
+# Direction and location of the maximum cumulative calibration error (C*).
+# C* is the maximum absolute cumulative calibration error on the natural
+# (risk/benefit) scale, and is the only reported quantity that admits a signed
+# interpretation; the test statistics (S_n, S*, B*) are referred to null
+# distributions of absolute deviations and are reported unsigned. The direction
+# is derived on the fly from the returned process, using the same orientation
+# (sign of the standardized cumulative sum at its peak) as plot.cumulcalib().
+.cumulcalib_cstar_direction <- function(x) {
+  S <- x$data[, 'S']
+  loc <- which.max(abs(S))
+  sgn <- sign(S[loc])
+  is_ite <- inherits(x, "cumulcalibITE")
+  quantity <- if (is_ite) "benefit" else "risk"
+  phrase <- if (sgn > 0) {
+    paste0("observed ", quantity, " > predicted")
+  } else if (sgn < 0) {
+    paste0("observed ", quantity, " < predicted")
+  } else {
+    "no net cumulative deviation"
+  }
+  list(
+    loc = loc,
+    time = unname(x$data[loc, 't']),
+    pred = unname(x$data[loc, 'X']),
+    sign = sgn,
+    phrase = phrase,
+    predictor_label = if (is_ite) "predicted ITE" else "predicted risk"
+  )
+}
 
 
-#' Generates cumulative calibration plots
-#' @return None
-#' @param x A cumulcalib object
-#' @param ... Parameters to be passed to plot()
+# Shape of miscalibration around the maximum cumulative error (C*). At the C*
+# location the cumulative process is at its extreme, so the local prediction
+# error typically has opposite signs on the two sides. When the process returns
+# meaningfully after the peak (an interior peak), this is a reversal/crossover;
+# when the peak sits at an endpoint (monotone accumulation), the discrepancy is
+# one-directional. `frac` is how large the post-peak return must be, relative to
+# the peak, to count as a reversal; `min_frac` requires each side to hold a
+# minimum share of the observations. Interpretation is only warranted when C* is
+# itself notable; summary() gates the call on the standardized C* (S*).
+.cumulcalib_crossover <- function(x, frac = 0.25, min_frac = 0.025) {
+  S <- x$data[, 'S']
+  n <- length(S)
+  loc <- which.max(abs(S))
+  left_net <- S[loc]
+  right_net <- S[n] - S[loc]
+  is_ite <- inherits(x, "cumulcalibITE")
+  quantity <- if (is_ite) "benefit" else "risk"
+  phr <- function(s) {
+    if (s >= 0) paste0("observed ", quantity, " exceeds predicted")
+    else paste0("observed ", quantity, " falls below predicted")
+  }
+  reverses <- (min(loc, n - loc) >= min_frac * n) &&
+    (sign(right_net) != sign(left_net)) &&
+    (abs(right_net) > frac * abs(left_net))
+  list(
+    reverses = reverses,
+    pred     = unname(x$data[loc, 'X']),
+    left     = phr(sign(left_net)),
+    right    = phr(sign(right_net)),
+    dominant = phr(sign(left_net)),
+    predictor_label = if (is_ite) "predicted ITE" else "predicted risk"
+  )
+}
+
+
+#' Concise printing of a cumulcalib object
+#'
+#' Prints a one-screen overview of a calibration assessment returned by
+#' [cumulcalib()] or [cumulcalibITE()]. For a fuller breakdown use [summary()].
+#'
+#' @return The input object, invisibly.
+#' @param x An object of class cumulcalib generated by cumulcalib() or cumulcalibITE()
+#' @param ... Not used
+#' @method print cumulcalib
 #' @export
-plot.cumulcalib <- function(x,...)
-{
-  UseMethod("plot",x)
-}
+print.cumulcalib <- function(x, ...) {
+  is_ite <- inherits(x, "cumulcalibITE")
+  writeLines(if (is_ite) {
+    "Cumulative calibration assessment (individualized treatment effects)"
+  } else {
+    "Cumulative calibration assessment (predicted risks)"
+  })
 
-#' @return None
-#' @param x An object of class cumulcalib generated by cumulcalib()
-#' @param method Which method to use. Options are BB (Brownian bridge test), BM (Brownian motion test), BB1p (1-part Brownian bridge test), and BM2p (2-part Brownian bridge test). If unspecified, returns the default method used in the cumulcalib() call
-#' @param draw_stat Should the statistic (terminal value an/or maximum drift, depending on method) be drawn? Default is TRUE
-#' @param stat_col The color(s) to draw the stat. Default is c('blue','red'). For single-part tests (BM and BB1p) only the first element is used
-#' @param draw_sig Whether significance lines should be drawn. Default is T. Colors will be the same as stat_col
-#' @param sig_level If to draw significance lines, at what level? Default is c(0.95,0.95). For single-part tests (BM and BB1p) only the first element is used
-#' @param x2axis If true, draws a second x-axis (on top) showing predicted risks
-#' @param y2axis If true, draws a second y-axis (on right) showing scaled partial sums
-#' @param ... Parameters to be passed to plot()
-#' @method plot cumulcalib
-plot.cumulcalib <- function(x, method=NULL, draw_stat=TRUE, stat_col=c('blue','red'), draw_sig=TRUE, sig_level=c(0.95,0.95), x2axis=TRUE, y2axis=TRUE, ...)
-{
-  if(is.null(method))
-  {
-    method <- x$method
+  m <- x$method
+  meta <- paste0(
+    "Method: ",
+    .cumulcalib_method_label(m),
+    "   |   n = ",
+    nrow(x$data)
+  )
+  if (is_ite && !is.null(x$approach)) {
+    meta <- paste0("Approach: ", x$approach, "   |   ", meta)
   }
-  else
-  {
-    if(length(method)>1)
-    {
-      stop("Only one method can be equested.")
+  writeLines(paste0("  ", meta))
+
+  writeLines(sprintf("  Mean calibration error (C_n): %.4g", x$C_n))
+  dir <- .cumulcalib_cstar_direction(x)
+  writeLines(sprintf(
+    "  Maximum cumulative calibration error (C*): %.4g  (%s, at %s = %.4g)",
+    x$C_star,
+    dir$phrase,
+    dir$predictor_label,
+    dir$pred
+  ))
+
+  mm <- x$by_method[[m]]
+  if (m %in% c("BB", "BB2p", "BM2p")) {
+    writeLines(sprintf(
+      "  Mean component:   S_n = %.3g,  p = %.3g",
+      x$S_n,
+      mm$pval_by_component[["mean"]]
+    ))
+    if (m %in% c("BB", "BB2p")) {
+      writeLines(sprintf(
+        "  Bridge component: B* = %.3g,  p = %.3g",
+        x$B_star,
+        mm$pval_by_component[["distance"]]
+      ))
+    } else {
+      writeLines(sprintf(
+        "  Distance comp.:   S* = %.3g,  p = %.3g",
+        x$S_star,
+        mm$pval_by_component[["distance"]]
+      ))
     }
-    if(!(method %in% names(x$by_method)))
-      stop(paste("The requested method has not been provided by the original cumulcalib() call. You asked for", method, "but the submitted object has method(s)", paste(names(x$by_method),collapse=",")))
+    writeLines(sprintf(
+      "  Unified p-value (moderate calibration): %.3g",
+      mm$pval
+    ))
+  } else {
+    writeLines(sprintf(
+      "  Test statistic = %.3g,  p-value = %.3g",
+      mm$stat,
+      mm$pval
+    ))
   }
-
-  oldpar <- par(no.readonly=TRUE)
-  on.exit(par(oldpar))
-
-  args <- list(...)
-
-  t_ <- x$data[,'t']
-  X <- x$data[,'X']
-  W <- x$data[,'S']
-  n <- length(W)
-  loc <- x$by_method[[method]]$loc
-
-  sign_p1 <- sign(W[n])
-  if(method %in% c("BB","BB1p","BB2p"))
-  {
-    sign_p2 <- sign(W[loc]-t_[loc]*W[n])
-  }
-  else
-  {
-    sign_p2 <- sign(W[loc])
-  }
-
-
-  sig_p1 <- sig_p2 <- 0 #0 indicates do not draw signifcance lines
-  if(draw_sig)
-  {
-    sig_p1 <- stats::qnorm(1-(1-sig_level[1])/2)
-
-    if(method %in% c("BM"))
-    {
-      sig_p2 <- qMAD_BM(sig_level[2])
-    }
-    if(method %in% c("BM2p"))
-    {
-      sig_p2 <- qMAD_BM_c(sig_level[2],w1=unname(x$by_method$BM2p$stat_by_component['mean']))
-    }
-    if(method %in% c("BB1p","BB"))
-    {
-      sig_p2 <- qKolmogorov(sig_level[2])
-    }
-  }
-
-  i <- match("xlim",names(args))
-  if(is.na(i))
-  {
-    args$xlim<-c(-0.03,1.01)
-  }
-  i <- match("ylim",names(args))
-  if(is.na(i))
-  {
-    args$ylim<- c(min(W,-sig_p1*(sign_p1==-1),-sig_p2*(sign_p2==-1),-1),max(W,sig_p1*(sign_p1==1),sig_p2*(sign_p2==1),1))
-  }
-  i <- match("type",names(args))
-  if(is.na(i))
-  {
-    args$type<-'l'
-  }
-  i <- match("xaxt",names(args))
-  if(is.na(i))
-  {
-    args$xaxt<-'n'
-  }
-  i <- match("yaxt",names(args))
-  if(is.na(i))
-  {
-    args$yaxt<-'n'
-  }
-  i <- match("xlab",names(args))
-  if(is.na(i))
-  {
-    args$xlab<-'Time'
-  }
-  i <- match("ylab",names(args))
-  if(is.na(i))
-  {
-    args$ylab<-'Standardized cumulative sum'
-  }
-
-  args$x<-t_
-  args$y<-W
-
-  args$xaxs<-'i'
-
-  par(mar=c(3,3,ifelse(x2axis,3,1),ifelse(y2axis,3,1)))
-
-  do.call(plot, args)
-
-  #Axes
-  axis(1, line=0,  at=(0:10)/10, labels=(0:10)/10, padj=0)
-  mtext(args$xlab, 1, line=2)
-
-  axis(side=2, at=pretty(args$ylim), padj=0)
-  mtext(args$ylab, 2, line=2)
-
-  if(x2axis)
-  {
-    xs <- round(unlist(lapply((0:10)/10, function (z) {x$data[which.min((x$data[,'t']-z)^2),'X']})),3)
-    axis(side=3, at=(0:10)/10, labels=xs, padj=0)
-    mtext("Predicted values", 3, line=2) #expression(pi) for label will generate the symbol!
-  }
-
-  if(y2axis)
-  {
-    y2p <- pretty(args$ylim/x$scale)
-    axis(side=4, at=y2p*x$scale, labels=y2p, padj=0)
-    mtext('Scaled cumulative sum',4, line=2)
-  }
-
-
-  lines(c(0,1),c(0,0),col="grey")
-
-  #Triangle
-  {
-    polygon(x=c(0,-0.03,-0.03), y=c(0,-1,1), col = 'black')
-  }
-
-  #P1 lines
-  if(method %in% c("BM2p","BB"))
-  {
-    if(draw_stat) lines(c(1,1),c(0,W[n]), col=stat_col[1])
-    if(draw_sig) lines(c(0,1),c(sign_p1*sig_p1,sign_p1*sig_p1),col=stat_col[1],lty=3)
-  }
-
-  #P2 lines
-  if(method %in% c('BB')) #If 2p bridge test then adjust the length of the red line and draw the bridge line
-  {
-    lines(c(0,1),c(0,W[n]),col="gray", lty=2)
-    if(draw_stat) lines(c(t_[loc],t_[loc]),c(t_[loc]/t_[n]*W[n],W[loc]),col=stat_col[2])
-    if(draw_sig) lines(c(0,1),c(sign_p2*sig_p2,sign_p2*sig_p2+W[n]),col=stat_col[2],lty=3)
-  }
-  else #BM or BM2p
-  {
-    if(draw_stat) lines(c(t_[loc],t_[loc]),c(0,W[loc]),col=stat_col[2])
-    if(draw_sig)  lines(c(0,1),c(sign_p2*sig_p2,sign_p2*sig_p2),col=stat_col[2],lty=3)
-  }
+  invisible(x)
 }
 
 
-
-
-
-#' Summarizes a cumulcalib object
-#' @return None
-#' @param object An object of class cumulcalib generated by cumulcalib()
-#' @param ... Other parameters passed to summary()
-#' @export
-summary.cumulcalib <- function(object, ...)
-{
-  UseMethod("summary",object)
-}
-
-
-
-#' Summarizes a cumulcalib object
-#' @return None
-#' @param object An object of class cumulcalib generated by cumulcalib()
-#' @param method Which method to use. Options are BB (Brownian bridge test), BM (Brownian motion test), BB1p (1-part Brownian bridge test), and BM2p (2-part Brownian bridge test). If unspecified, returns the default method used in the cumulcalib() call
-#' @param ... Other parameters passed to summary()
+#' Summarize a cumulcalib object
+#'
+#' Builds a structured summary of a calibration assessment for the selected
+#' method. The returned object has class \code{summary.cumulcalib} and is
+#' displayed by [print.summary.cumulcalib()].
+#'
+#' @return An object of class \code{summary.cumulcalib}: a list holding the key
+#'   statistics for the selected method (mean calibration, distance/bridge
+#'   statistic, p-values) together with the maximum cumulative calibration
+#'   error C* and, since C* is the only quantity that admits a signed
+#'   interpretation, its direction (\code{C_star_sign},
+#'   \code{C_star_direction}) and the location of that maximum
+#'   (\code{C_star_time}, \code{C_star_pred}). The test statistics are reported
+#'   unsigned. When the standardized maximum deviation (S*) is at least
+#'   \code{shape_threshold}, a \code{crossover} element describes the shape of
+#'   the miscalibration around the C* location: whether the cumulative error
+#'   reverses (an interior peak, with opposite directions on either side) or is
+#'   one-directional (a monotone accumulation), together with the direction(s).
+#'   Otherwise \code{crossover} is \code{NULL}.
+#' @param object An object of class cumulcalib generated by cumulcalib() or cumulcalibITE()
+#' @param method Which method to use. Options are BB (Brownian bridge test), BM (Brownian motion test), BB1p (1-part Brownian bridge test), and BM2p (2-part Brownian bridge test). If unspecified, uses the default method used in the cumulcalib() call
+#' @param shape_threshold Minimum standardized maximum deviation (S*) for the shape of the miscalibration around C* to be described. Below this, the cumulative process is treated as unremarkable and no shape is reported (default 1.5).
+#' @param ... Not used
 #' @method summary cumulcalib
-summary.cumulcalib <- function(object, method=NULL, ...)
-{
-  if(is.null(method))
-  {
+#' @export
+summary.cumulcalib <- function(object, method = NULL, shape_threshold = 1.5, ...) {
+  if (is.null(method)) {
     method <- object$method
-  }
-  else
-  {
-    if(length(method)>1)
-    {
-      stop("Only one method can be equested.")
+  } else {
+    if (length(method) > 1) {
+      stop("Only one method can be requested.")
     }
-    if(!(method %in% names(object$by_method)))
-      stop(paste("The requested method has not been provided by the original cumulcalib() call. You asked for", method, "but the submitted object has method(s)", paste(names(object$by_method),collapse=",")))
+    if (!(method %in% names(object$by_method))) {
+      stop(paste(
+        "The requested method has not been provided by the original cumulcalib() call. You asked for",
+        method,
+        "but the submitted object has method(s)",
+        paste(names(object$by_method), collapse = ",")
+      ))
+    }
   }
 
-  n <- dim(object$data)[1]
-  writeLines(paste("C_n (mean calibration error):",object$C_n))
-  writeLines(paste("C* (maximum absolute cumulative calibration error):",object$C_star))
+  is_ite <- inherits(object, "cumulcalibITE")
+  dir <- .cumulcalib_cstar_direction(object)
+  # Describe the shape only when the deviation is notable (gate on S*).
+  crossover <- if (object$S_star >= shape_threshold) {
+    .cumulcalib_crossover(object)
+  } else {
+    NULL
+  }
 
-  if(method=="BM" || method=="BM1p")
-  {
-    writeLines("Method: One-part Brownian Motion (BM)")
-    writeLines(paste("S* (test statistic for cumulative calibration error):",object$S_star))
-    writeLines(paste("p-value:",object$by_method$BM$pval))
-    writeLines(paste("Location of maximum drift:",object$by_method$BM$loc,
-                " | time value:", object$data[object$by_method$BM$loc,'t'],
-                " | predictor value:", object$data[object$by_method$BM$loc,'X']))
-  }
-  if(method=="BM2p")
-  {
-    writeLines("Method: Two-part Brownian Motion (BM2p)")
-    writeLines(paste("S_n (Z score for mean calibration error)",object$S_n))
-    writeLines(paste("S* (test statistic for cumulative calibration error):",object$S_star))
-    writeLines(paste0("Component-wise p-values: mean calibration=", object$by_method$BM2p$pval_by_component[1], " | Distance=", object$by_method$BM2p$pval_by_component[2]))
-    writeLines(object$by_method$BM2p$pval_by_component)
-    writeLines(paste("Combined p-value (Fisher's method):",object$by_method$BM2p$pval))
-    writeLines(paste("Location of maximum drift:",object$by_method$BM2p$loc,
-                " | time value:", object$data[object$by_method$BM2p$loc,'t'],
-                " | predictor value:", object$data[object$by_method$BM2p$loc,'X']))
-  }
-  if(method=="BB1p")
-  {
-    writeLines("Method: One-part Brownian Bridge (BB1p)")
-    writeLines(paste("B* (test statistic for maximum absolute bridged calibration error):",object$B_star))
-    writeLines(paste("Test statistic value:",object$by_method$BB1p$stat))
-    writeLines(paste("p-value:",object$by_method$BB1p$pval))
-    writeLines(paste("Location of maximum drift:",object$by_method$BB1p$loc,
-                " | time value:", object$data[object$by_method$BB1p$loc,'t'],
-                " | predictor value:", object$data[object$by_method$BB1p$loc,'X']))
-  }
-  if(method=="BB" || method=="BB2p")
-  {
-    writeLines("Method: Two-part Brownian Bridge (BB)")
-    writeLines(paste("S_n (Z score for mean calibration error)",object$S_n))
-    writeLines(paste("B* (test statistic for maximum absolute bridged calibration error):",object$B_star))
-    writeLines(paste0("Component-wise p-values: mean calibration=", object$by_method$BB$pval_by_component[1], " | Distance (bridged)=", object$by_method$BB$pval_by_component[2]))
-    writeLines(paste("Combined p-value (Fisher's method):",object$by_method$BB$pval))
-    writeLines(paste("Location of maximum drift:",object$by_method$BB$loc,
-                " | time value:", object$data[object$by_method$BB$loc,'t'],
-                " | predictor value:", object$data[object$by_method$BB$loc,'X']))
-  }
+  structure(
+    list(
+      type = if (is_ite) "ITE" else "risk",
+      approach = object$approach,
+      method = method,
+      n = nrow(object$data),
+      C_n = object$C_n,
+      C_star = object$C_star,
+      C_star_sign = dir$sign,
+      C_star_direction = dir$phrase,
+      C_star_time = dir$time,
+      C_star_pred = dir$pred,
+      S_n = object$S_n,
+      S_star = object$S_star,
+      B_star = object$B_star,
+      crossover = crossover,
+      stats = object$by_method[[method]],
+      predictor_label = dir$predictor_label
+    ),
+    class = "summary.cumulcalib"
+  )
 }
 
 
+#' Print a cumulcalib summary
+#'
+#' @return The input object, invisibly.
+#' @param x An object of class summary.cumulcalib generated by summary()
+#' @param ... Not used
+#' @method print summary.cumulcalib
+#' @export
+print.summary.cumulcalib <- function(x, ...) {
+  writeLines(if (x$type == "ITE") {
+    "Moderate calibration assessment of individualized treatment effects"
+  } else {
+    "Moderate calibration assessment of predicted risks"
+  })
+  if (x$type == "ITE" && !is.null(x$approach)) {
+    writeLines(paste("Approach:", x$approach))
+  }
 
+  writeLines(paste("C_n (mean calibration error):", x$C_n))
+  writeLines(paste0(
+    "C* (maximum cumulative calibration error): ",
+    x$C_star,
+    "  (", x$C_star_direction, ")"
+  ))
+  writeLines(paste0(
+    "  Location of maximum cumulative error: time = ",
+    x$C_star_time,
+    ", ",
+    x$predictor_label,
+    " = ",
+    x$C_star_pred
+  ))
+  if (!is.null(x$crossover)) {
+    cr <- x$crossover
+    if (cr$reverses) {
+      writeLines(paste0(
+        "  Shape: the cumulative error reverses around ",
+        x$predictor_label, " = ", signif(cr$pred, 3),
+        " (", cr$left, " below this point; ", cr$right, " above it)"
+      ))
+    } else {
+      writeLines(paste0(
+        "  Shape: one-directional, no reversal (", cr$dominant,
+        " across the range)"
+      ))
+    }
+  }
+
+  m <- x$method
+  st <- x$stats
+  writeLines(paste("Method:", .cumulcalib_method_label(m)))
+  if (m %in% c("BM", "BM1p")) {
+    writeLines(paste(
+      "S* (test statistic for cumulative calibration error):",
+      x$S_star
+    ))
+    writeLines(paste("p-value:", st$pval))
+  } else if (m == "BM2p") {
+    writeLines(paste("S_n (Z score for mean calibration error):", x$S_n))
+    writeLines(paste(
+      "S* (test statistic for cumulative calibration error):",
+      x$S_star
+    ))
+    writeLines(paste0(
+      "Component-wise p-values: mean calibration=",
+      st$pval_by_component[["mean"]],
+      " | Distance=",
+      st$pval_by_component[["distance"]]
+    ))
+    writeLines(paste("Combined p-value (Fisher's method):", st$pval))
+  } else if (m == "BB1p") {
+    writeLines(paste(
+      "B* (test statistic for maximum absolute bridged calibration error):",
+      x$B_star
+    ))
+    writeLines(paste("Test statistic value:", st$stat))
+    writeLines(paste("p-value:", st$pval))
+  } else if (m %in% c("BB", "BB2p")) {
+    writeLines(paste("S_n (Z score for mean calibration error):", x$S_n))
+    writeLines(paste(
+      "B* (test statistic for maximum absolute bridged calibration error):",
+      x$B_star
+    ))
+    writeLines(paste0(
+      "Component-wise p-values: mean calibration=",
+      st$pval_by_component[["mean"]],
+      " | Distance (bridged)=",
+      st$pval_by_component[["distance"]]
+    ))
+    writeLines(paste("Combined p-value (Fisher's method):", st$pval))
+  }
+  invisible(x)
+}
+
+
+ate <- function(y, a) {
+  A <- sum((1 - a) * y)
+  B <- sum(1 - a)
+  C <- sum(a * y)
+  D <- sum(a)
+  ate <- A / B - C / D
+  v <- A / B * (1 - A / B) / B + C / D * (1 - C / D) / D
+
+  c(ate = ate, var = v)
+}

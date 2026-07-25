@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+
+<html>
+
+<head>
+
+<meta charset="utf-8" />
+<meta name="generator" content="pandoc" />
+<meta http-equiv="X-UA-Compatible" content="IE=EDGE" />
+
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+
+<meta name="author" content="Mohsen Sadatsafavi" />
+
+<meta name="date" content="2026-07-24" />
+
+<title>Assessing moderate calibration of individualized treatment effects with cumulcalibITE</title>
+
+<script>// Pandoc 2.9 adds attributes on both header and div. We remove the former (to
+// be compatible with the behavior of Pandoc < 2.8).
+document.addEventListener('DOMContentLoaded', function(e) {
+  var hs = document.querySelectorAll("div.section[class*='level'] > :first-child");
+  var i, h, a;
+  for (i = 0; i < hs.length; i++) {
+    h = hs[i];
+    if (!/^h[1-6]$/i.test(h.tagName)) continue;  // it should be a header h1-h6
+    a = h.attributes;
+    while (a.length > 0) h.removeAttribute(a[0].name);
+  }
+});
+</script>
+
+<style type="text/css">
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+span.underline{text-decoration: underline;}
+div.column{display: inline-block; vertical-align: top; width: 50%;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+</style>
+
+
+
+<style type="text/css">
+code {
+white-space: pre;
+}
+.sourceCode {
+overflow: visible;
+}
+</style>
+<style type="text/css" data-origin="pandoc">
+html { -webkit-text-size-adjust: 100%; }
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+{ counter-reset: source-line 0; }
+pre.numberSource code > span
+{ position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+{ content: counter(source-line);
+position: relative; left: -1em; text-align: right; vertical-align: baseline;
+border: none; display: inline-block;
+-webkit-touch-callout: none; -webkit-user-select: none;
+-khtml-user-select: none; -moz-user-select: none;
+-ms-user-select: none; user-select: none;
+padding: 0 4px; width: 4em;
+color: #aaaaaa;
+}
+pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa; padding-left: 4px; }
+div.sourceCode
+{ }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+code span.al { color: #ff0000; font-weight: bold; } 
+code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } 
+code span.at { color: #7d9029; } 
+code span.bn { color: #40a070; } 
+code span.bu { color: #008000; } 
+code span.cf { color: #007020; font-weight: bold; } 
+code span.ch { color: #4070a0; } 
+code span.cn { color: #880000; } 
+code span.co { color: #60a0b0; font-style: italic; } 
+code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } 
+code span.do { color: #ba2121; font-style: italic; } 
+code span.dt { color: #902000; } 
+code span.dv { color: #40a070; } 
+code span.er { color: #ff0000; font-weight: bold; } 
+code span.ex { } 
+code span.fl { color: #40a070; } 
+code span.fu { color: #06287e; } 
+code span.im { color: #008000; font-weight: bold; } 
+code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } 
+code span.kw { color: #007020; font-weight: bold; } 
+code span.op { color: #666666; } 
+code span.ot { color: #007020; } 
+code span.pp { color: #bc7a00; } 
+code span.sc { color: #4070a0; } 
+code span.ss { color: #bb6688; } 
+code span.st { color: #4070a0; } 
+code span.va { color: #19177c; } 
+code span.vs { color: #4070a0; } 
+code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } 
+</style>
+<script>
+// apply pandoc div.sourceCode style to pre.sourceCode instead
+(function() {
+  var sheets = document.styleSheets;
+  for (var i = 0; i < sheets.length; i++) {
+    if (sheets[i].ownerNode.dataset["origin"] !== "pandoc") continue;
+    try { var rules = sheets[i].cssRules; } catch (e) { continue; }
+    var j = 0;
+    while (j < rules.length) {
+      var rule = rules[j];
+      // check if there is a div.sourceCode rule
+      if (rule.type !== rule.STYLE_RULE || rule.selectorText !== "div.sourceCode") {
+        j++;
+        continue;
+      }
+      var style = rule.style.cssText;
+      // check if color or background-color is set
+      if (rule.style.color === '' && rule.style.backgroundColor === '') {
+        j++;
+        continue;
+      }
+      // replace div.sourceCode by a pre.sourceCode rule
+      sheets[i].deleteRule(j);
+      sheets[i].insertRule('pre.sourceCode{' + style + '}', j);
+    }
+  }
+})();
+</script>
+
+
+
+
+<style type="text/css">body {
+background-color: #fff;
+margin: 1em auto;
+max-width: 700px;
+overflow: visible;
+padding-left: 2em;
+padding-right: 2em;
+font-family: "Open Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
+font-size: 14px;
+line-height: 1.35;
+}
+#TOC {
+clear: both;
+margin: 0 0 10px 10px;
+padding: 4px;
+width: 400px;
+border: 1px solid #CCCCCC;
+border-radius: 5px;
+background-color: #f6f6f6;
+font-size: 13px;
+line-height: 1.3;
+}
+#TOC .toctitle {
+font-weight: bold;
+font-size: 15px;
+margin-left: 5px;
+}
+#TOC ul {
+padding-left: 40px;
+margin-left: -1.5em;
+margin-top: 5px;
+margin-bottom: 5px;
+}
+#TOC ul ul {
+margin-left: -2em;
+}
+#TOC li {
+line-height: 16px;
+}
+table {
+margin: 1em auto;
+border-width: 1px;
+border-color: #DDDDDD;
+border-style: outset;
+border-collapse: collapse;
+}
+table th {
+border-width: 2px;
+padding: 5px;
+border-style: inset;
+}
+table td {
+border-width: 1px;
+border-style: inset;
+line-height: 18px;
+padding: 5px 5px;
+}
+table, table th, table td {
+border-left-style: none;
+border-right-style: none;
+}
+table thead, table tr.even {
+background-color: #f7f7f7;
+}
+p {
+margin: 0.5em 0;
+}
+blockquote {
+background-color: #f6f6f6;
+padding: 0.25em 0.75em;
+}
+hr {
+border-style: solid;
+border: none;
+border-top: 1px solid #777;
+margin: 28px 0;
+}
+dl {
+margin-left: 0;
+}
+dl dd {
+margin-bottom: 13px;
+margin-left: 13px;
+}
+dl dt {
+font-weight: bold;
+}
+ul {
+margin-top: 0;
+}
+ul li {
+list-style: circle outside;
+}
+ul ul {
+margin-bottom: 0;
+}
+pre, code {
+background-color: #f7f7f7;
+border-radius: 3px;
+color: #333;
+white-space: pre-wrap; 
+}
+pre {
+border-radius: 3px;
+margin: 5px 0px 10px 0px;
+padding: 10px;
+}
+pre:not([class]) {
+background-color: #f7f7f7;
+}
+code {
+font-family: Consolas, Monaco, 'Courier New', monospace;
+font-size: 85%;
+}
+p > code, li > code {
+padding: 2px 0px;
+}
+div.figure {
+text-align: center;
+}
+img {
+background-color: #FFFFFF;
+padding: 2px;
+border: 1px solid #DDDDDD;
+border-radius: 3px;
+border: 1px solid #CCCCCC;
+margin: 0 5px;
+}
+h1 {
+margin-top: 0;
+font-size: 35px;
+line-height: 40px;
+}
+h2 {
+border-bottom: 4px solid #f7f7f7;
+padding-top: 10px;
+padding-bottom: 2px;
+font-size: 145%;
+}
+h3 {
+border-bottom: 2px solid #f7f7f7;
+padding-top: 10px;
+font-size: 120%;
+}
+h4 {
+border-bottom: 1px solid #f7f7f7;
+margin-left: 8px;
+font-size: 105%;
+}
+h5, h6 {
+border-bottom: 1px solid #ccc;
+font-size: 105%;
+}
+a {
+color: #0033dd;
+text-decoration: none;
+}
+a:hover {
+color: #6666ff; }
+a:visited {
+color: #800080; }
+a:visited:hover {
+color: #BB00BB; }
+a[href^="http:"] {
+text-decoration: underline; }
+a[href^="https:"] {
+text-decoration: underline; }
+
+code > span.kw { color: #555; font-weight: bold; } 
+code > span.dt { color: #902000; } 
+code > span.dv { color: #40a070; } 
+code > span.bn { color: #d14; } 
+code > span.fl { color: #d14; } 
+code > span.ch { color: #d14; } 
+code > span.st { color: #d14; } 
+code > span.co { color: #888888; font-style: italic; } 
+code > span.ot { color: #007020; } 
+code > span.al { color: #ff0000; font-weight: bold; } 
+code > span.fu { color: #900; font-weight: bold; } 
+code > span.er { color: #a61717; background-color: #e3d2d2; } 
+</style>
+
+
+
+
+</head>
+
+<body>
+
+
+
+
+<h1 class="title toc-ignore">Assessing moderate calibration of
+individualized treatment effects with cumulcalibITE</h1>
+<h4 class="author">Mohsen Sadatsafavi</h4>
+<h4 class="date">2026-07-24</h4>
+
+
+
+<div id="introduction" class="section level2">
+<h2>Introduction</h2>
+<p>This is a short companion to the main <em>cumulcalib</em> tutorial,
+focused on <code>cumulcalibITE()</code>, which assesses the
+<strong>moderate calibration</strong> of predicted <em>individualized
+treatment effects</em> (ITEs). Where <code>cumulcalib()</code> evaluates
+predicted risks, <code>cumulcalibITE()</code> evaluates predicted
+treatment benefits: the reduction in outcome risk a patient is expected
+to gain from treatment.</p>
+<p>For an ITE model, moderate calibration means that, among individuals
+with a predicted treatment effect of <span class="math inline">\(z\)</span>, the average true treatment effect is
+also <span class="math inline">\(z\)</span>. Following the same idea as
+for risks, this is assessed on the <strong>cumulative-sum
+domain</strong>: after ordering the validation sample from the smallest
+to the largest predicted ITE, a standardized process of cumulative
+prediction errors (the <span class="math inline">\(\{S\}\)</span>
+process) is constructed that, under the null hypothesis of moderate
+calibration, converges to Brownian motion. Inference, visualization, and
+summary metrics then follow from the properties of Brownian motion.
+Because treatment benefit is never observed at the individual level (one
+potential outcome is always counterfactual), the cumulative errors are
+built from an estimator of the cumulative treatment effect within the
+ordered sample. See the original paper for the methodology.</p>
+<div id="two-approaches-conditional-and-marginal" class="section level3">
+<h3>Two approaches: conditional and marginal</h3>
+<p>Constructing the <span class="math inline">\(\{S\}\)</span> process
+requires the (history-)conditional mean and variance of the increments,
+and these depend on the true baseline (control) risks, which are
+unknown. The package offers two approaches to resolve this, <strong>both
+of which assess the same null hypothesis of moderate calibration of the
+ITEs</strong>:</p>
+<ul>
+<li><p><strong>Conditional approach</strong> – substitute the model’s
+<em>predicted</em> baseline risks for the unknown true risks. This is
+valid <em>conditional on</em> those predicted risks being calibrated
+within strata of predicted ITE, and it requires the model to output
+baseline risks. In <code>cumulcalibITE()</code>, this approach is
+selected by supplying the baseline risk through the <code>p</code>
+argument.</p></li>
+<li><p><strong>Marginal approach</strong> – replace the cumulative
+conditional mean and, crucially, the cumulative conditional
+<strong>variance</strong> of the process with their
+<strong>marginal</strong> counterparts, estimated from the observed
+event rates in each treatment arm. This requires no baseline risks and
+applies to any ITE model (including those that do not predict risks). It
+is selected by <strong>omitting</strong> <code>p</code>. The marginal
+approach is approximate (heuristic), but in simulations it performs
+comparably to the conditional approach.</p></li>
+</ul>
+<p>For brevity, this tutorial demonstrates the <strong>marginal
+approach</strong>; the conditional approach is shown at the end and is
+obtained simply by adding <code>p</code>.</p>
+</div>
+</div>
+<div id="setup-an-ite-model-based-on-the-gusto-data" class="section level2">
+<h2>Setup: an ITE model based on the GUSTO data</h2>
+<p>We use the GUSTO-I data from the <em>predtools</em> package. The
+treatment is thrombolytic therapy: accelerated tPA (the active arm,
+<code>a = 1</code>) versus streptokinase (SK, control,
+<code>a = 0</code>); we restrict the data to these two arms. The outcome
+<code>y</code> is 30-day mortality. To obtain a genuine ITE model we
+include treatment effect modifiers (treatment-by-sex and
+treatment-by-age interactions), so that the predicted benefit varies
+across individuals.</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" tabindex="-1"></a>  <span class="fu">library</span>(predtools)</span>
+<span id="cb1-2"><a href="#cb1-2" tabindex="-1"></a>  <span class="fu">data</span>(gusto)</span>
+<span id="cb1-3"><a href="#cb1-3" tabindex="-1"></a>  <span class="fu">set.seed</span>(<span class="dv">1</span>)</span>
+<span id="cb1-4"><a href="#cb1-4" tabindex="-1"></a></span>
+<span id="cb1-5"><a href="#cb1-5" tabindex="-1"></a>  gusto <span class="ot">&lt;-</span> gusto[gusto<span class="sc">$</span>tx <span class="sc">%in%</span> <span class="fu">c</span>(<span class="st">&quot;tPA&quot;</span>, <span class="st">&quot;SK&quot;</span>), ]</span>
+<span id="cb1-6"><a href="#cb1-6" tabindex="-1"></a>  gusto<span class="sc">$</span>y      <span class="ot">&lt;-</span> gusto<span class="sc">$</span>day30</span>
+<span id="cb1-7"><a href="#cb1-7" tabindex="-1"></a>  gusto<span class="sc">$</span>a      <span class="ot">&lt;-</span> <span class="fu">as.numeric</span>(gusto<span class="sc">$</span>tx <span class="sc">==</span> <span class="st">&quot;tPA&quot;</span>)          <span class="co"># 1 = tPA (active), 0 = SK (control)</span></span>
+<span id="cb1-8"><a href="#cb1-8" tabindex="-1"></a>  gusto<span class="sc">$</span>female <span class="ot">&lt;-</span> <span class="fu">as.numeric</span>(gusto<span class="sc">$</span>sex <span class="sc">==</span> <span class="st">&quot;female&quot;</span>)</span>
+<span id="cb1-9"><a href="#cb1-9" tabindex="-1"></a>  gusto<span class="sc">$</span>kill   <span class="ot">&lt;-</span> (<span class="fu">as.numeric</span>(gusto<span class="sc">$</span>Killip) <span class="sc">&gt;</span> <span class="dv">1</span>) <span class="sc">*</span> <span class="dv">1</span></span>
+<span id="cb1-10"><a href="#cb1-10" tabindex="-1"></a>  gusto<span class="sc">$</span>miloc  <span class="ot">&lt;-</span> <span class="fu">relevel</span>(<span class="fu">factor</span>(gusto<span class="sc">$</span>miloc), <span class="at">ref =</span> <span class="st">&quot;Inferior&quot;</span>)</span>
+<span id="cb1-11"><a href="#cb1-11" tabindex="-1"></a>  gusto<span class="sc">$</span>sbp    <span class="ot">&lt;-</span> <span class="fu">pmin</span>(gusto<span class="sc">$</span>sysbp, <span class="dv">100</span>)</span></code></pre></div>
+<p>As in the main tutorial, we develop the model on the non-US
+sub-sample and validate it on the US sub-sample. Treatment enters the
+model as a main effect and in interaction with sex and age (our
+hypothesized effect modifiers).</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb2-1"><a href="#cb2-1" tabindex="-1"></a>  dev_data <span class="ot">&lt;-</span> gusto[<span class="sc">!</span>gusto<span class="sc">$</span>regl <span class="sc">%in%</span> <span class="fu">c</span>(<span class="dv">1</span>, <span class="dv">7</span>, <span class="dv">9</span>, <span class="dv">10</span>, <span class="dv">11</span>, <span class="dv">12</span>, <span class="dv">14</span>, <span class="dv">15</span>), ]</span>
+<span id="cb2-2"><a href="#cb2-2" tabindex="-1"></a>  val_data <span class="ot">&lt;-</span> gusto[ gusto<span class="sc">$</span>regl <span class="sc">%in%</span> <span class="fu">c</span>(<span class="dv">1</span>, <span class="dv">7</span>, <span class="dv">9</span>, <span class="dv">10</span>, <span class="dv">11</span>, <span class="dv">12</span>, <span class="dv">14</span>, <span class="dv">15</span>), ]</span>
+<span id="cb2-3"><a href="#cb2-3" tabindex="-1"></a>  model <span class="ot">&lt;-</span> <span class="fu">glm</span>(y <span class="sc">~</span> female <span class="sc">+</span> age <span class="sc">+</span> miloc <span class="sc">+</span> pmi <span class="sc">+</span> kill <span class="sc">+</span> sbp <span class="sc">+</span> pulse <span class="sc">+</span> a <span class="sc">+</span> a<span class="sc">:</span>female <span class="sc">+</span> a<span class="sc">:</span>age,</span>
+<span id="cb2-4"><a href="#cb2-4" tabindex="-1"></a>               <span class="at">data =</span> dev_data, <span class="at">family =</span> <span class="fu">binomial</span>(<span class="at">link =</span> <span class="st">&quot;logit&quot;</span>))</span></code></pre></div>
+<p>The predicted ITE for each validation patient is the difference
+between their predicted risk under control and under treatment (the
+predicted reduction in mortality risk):</p>
+<div class="sourceCode" id="cb3"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb3-1"><a href="#cb3-1" tabindex="-1"></a>  val_data<span class="sc">$</span>pi0 <span class="ot">&lt;-</span> <span class="fu">predict</span>(model, <span class="at">newdata =</span> <span class="fu">transform</span>(val_data, <span class="at">a =</span> <span class="dv">0</span>), <span class="at">type =</span> <span class="st">&quot;response&quot;</span>)  <span class="co"># baseline (control) risk</span></span>
+<span id="cb3-2"><a href="#cb3-2" tabindex="-1"></a>  val_data<span class="sc">$</span>pi1 <span class="ot">&lt;-</span> <span class="fu">predict</span>(model, <span class="at">newdata =</span> <span class="fu">transform</span>(val_data, <span class="at">a =</span> <span class="dv">1</span>), <span class="at">type =</span> <span class="st">&quot;response&quot;</span>)  <span class="co"># risk under treatment</span></span>
+<span id="cb3-3"><a href="#cb3-3" tabindex="-1"></a>  val_data<span class="sc">$</span>d   <span class="ot">&lt;-</span> val_data<span class="sc">$</span>pi0 <span class="sc">-</span> val_data<span class="sc">$</span>pi1                                              <span class="co"># predicted ITE</span></span></code></pre></div>
+<p>The mean predicted ITE in the validation sample is 0.008, compared
+with an observed average treatment effect (ATE) of 0.012.</p>
+</div>
+<div id="assessing-moderate-calibration-the-marginal-approach" class="section level2">
+<h2>Assessing moderate calibration: the marginal approach</h2>
+<p>To use the marginal approach we call <code>cumulcalibITE()</code>
+with the outcome <code>y</code>, the predicted ITE <code>d</code>, and
+the treatment indicator <code>a</code> – and we <strong>omit</strong>
+<code>p</code>. Following the recommendation in the paper, we use the
+two-part <code>&quot;BB&quot;</code> (bridge) test, which decomposes the
+assessment into a mean-calibration component and a bridge component and
+generally has higher power.</p>
+<div class="sourceCode" id="cb4"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb4-1"><a href="#cb4-1" tabindex="-1"></a>  <span class="fu">library</span>(cumulcalib)</span>
+<span id="cb4-2"><a href="#cb4-2" tabindex="-1"></a>  res <span class="ot">&lt;-</span> <span class="fu">cumulcalibITE</span>(val_data<span class="sc">$</span>y, <span class="at">h =</span> val_data<span class="sc">$</span>d, <span class="at">a =</span> val_data<span class="sc">$</span>a, <span class="at">method =</span> <span class="st">&quot;BB&quot;</span>)</span>
+<span id="cb4-3"><a href="#cb4-3" tabindex="-1"></a>  <span class="fu">summary</span>(res)</span>
+<span id="cb4-4"><a href="#cb4-4" tabindex="-1"></a><span class="co">#&gt; Moderate calibration assessment of individualized treatment effects</span></span>
+<span id="cb4-5"><a href="#cb4-5" tabindex="-1"></a><span class="co">#&gt; Approach: marginal</span></span>
+<span id="cb4-6"><a href="#cb4-6" tabindex="-1"></a><span class="co">#&gt; C_n (mean calibration error): 0.00450999603471559</span></span>
+<span id="cb4-7"><a href="#cb4-7" tabindex="-1"></a><span class="co">#&gt; C* (maximum cumulative calibration error): 0.00559910543541125  (observed benefit &gt; predicted)</span></span>
+<span id="cb4-8"><a href="#cb4-8" tabindex="-1"></a><span class="co">#&gt;   Location of maximum cumulative error: time = 0.96015470901985, predicted ITE = 0.0445832755378081</span></span>
+<span id="cb4-9"><a href="#cb4-9" tabindex="-1"></a><span class="co">#&gt; Method: Two-part Brownian bridge (BB)</span></span>
+<span id="cb4-10"><a href="#cb4-10" tabindex="-1"></a><span class="co">#&gt; S_n (Z score for mean calibration error): 1.15774227105483</span></span>
+<span id="cb4-11"><a href="#cb4-11" tabindex="-1"></a><span class="co">#&gt; B* (test statistic for maximum absolute bridged calibration error): 1.39879642646784</span></span>
+<span id="cb4-12"><a href="#cb4-12" tabindex="-1"></a><span class="co">#&gt; Component-wise p-values: mean calibration=0.246969228103424 | Distance (bridged)=0.0399501171176525</span></span>
+<span id="cb4-13"><a href="#cb4-13" tabindex="-1"></a><span class="co">#&gt; Combined p-value (Fisher&#39;s method): 0.0554357836981664</span></span></code></pre></div>
+<p>The bridge test reports two components and a unified p-value:</p>
+<ul>
+<li>the <strong>mean-calibration</strong> component (the standardized
+terminal value <code>S_n</code>), a necessary condition for moderate
+calibration, with p-value 0.247;</li>
+<li>the <strong>bridge</strong> component (the maximum deviation of the
+standardized walk from the line joining its endpoints), which captures
+non-linear miscalibration independently of mean calibration, with
+p-value 0.04;</li>
+<li>the <strong>unified</strong> p-value for moderate calibration
+(Fisher’s combination), 0.055.</li>
+</ul>
+<p>Here the unified p-value is close to, but above, the 0.05 level; the
+signal comes mainly from the bridge component, indicating mild
+non-linear miscalibration of the predicted ITEs across their range
+rather than a systematic mean bias.</p>
+</div>
+<div id="visual-assessment" class="section level2">
+<h2>Visual assessment</h2>
+<p>The returned object is plotted with the same <code>plot()</code>
+method used for risks:</p>
+<div class="sourceCode" id="cb5"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb5-1"><a href="#cb5-1" tabindex="-1"></a>  <span class="fu">plot</span>(res)</span></code></pre></div>
+<p><img role="img" src="data:image/png;base64,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" /><!-- --></p>
+<p>The primary X and Y axes show the time and location components of the
+standardized <span class="math inline">\(\{S\}\)</span> process; the top
+X-axis shows the corresponding predicted ITEs, and the right Y-axis
+shows the scaled (unstandardized) cumulative errors, whose terminal
+value is <code>C_n</code>. The blue vertical line marks the
+mean-calibration component (the terminal value of the random walk) and
+the red vertical line the bridge component. By default their
+significance thresholds are not drawn; pass
+<code>stats_config = list(lines = &quot;vh&quot;)</code> to <code>plot()</code> to
+add them as dashed lines of the same color. One quirk specific to the
+marginal approach is that, because the marginal variance is not
+guaranteed to be monotone, the process can occasionally show small
+negative time increments.</p>
+</div>
+<div id="the-conditional-approach" class="section level2">
+<h2>The conditional approach</h2>
+<p>If the model produces baseline risks and they can be assumed
+calibrated within strata of predicted ITE, the conditional approach is
+available simply by passing those baseline (no-treatment) risks via
+<code>p</code>. Here that is <code>pi0</code>:</p>
+<div class="sourceCode" id="cb6"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb6-1"><a href="#cb6-1" tabindex="-1"></a>  <span class="co"># Conditional approach: supply the predicted baseline (control) risk via p</span></span>
+<span id="cb6-2"><a href="#cb6-2" tabindex="-1"></a>  res_conditional <span class="ot">&lt;-</span> <span class="fu">cumulcalibITE</span>(val_data<span class="sc">$</span>y, <span class="at">h =</span> val_data<span class="sc">$</span>d, <span class="at">a =</span> val_data<span class="sc">$</span>a,</span>
+<span id="cb6-3"><a href="#cb6-3" tabindex="-1"></a>                                    <span class="at">p =</span> val_data<span class="sc">$</span>pi0, <span class="at">method =</span> <span class="st">&quot;BB&quot;</span>)</span></code></pre></div>
+<p>The conditional approach has a firmer theoretical footing (a
+functional central limit theorem can be established for it), but it
+relies on the calibration of the predicted baseline risks; the marginal
+approach avoids that assumption at the cost of being heuristic.</p>
+</div>
+
+
+
+<!-- code folding -->
+
+
+<!-- dynamically load mathjax for compatibility with self-contained -->
+<script>
+  (function () {
+    var script = document.createElement("script");
+    script.type = "text/javascript";
+    script.src  = "https://mathjax.rstudio.com/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML";
+    document.getElementsByTagName("head")[0].appendChild(script);
+  })();
+</script>
+
+</body>
+</html>
